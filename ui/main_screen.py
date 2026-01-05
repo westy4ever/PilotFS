@@ -149,12 +149,8 @@ class PilotFSMain(Screen):
         self.operation_current = 0
         self.operation_total = 0
         
-        # OK button tracking - IMPLEMENTED LONG PRESS DETECTION
-        self.ok_press_time = 0
-        self.ok_long_press_detected = False
-        self.ok_timer = eTimer()
-        self.ok_timer.callback.append(self.check_ok_long_press)
-        self.ok_long_press_threshold = self.config.plugins.pilotfs.ok_long_press_time.value / 1000.0
+        # OK button - Simple navigation (long press disabled)
+        # Long press feature removed for immediate response
         
         # Clipboard
         self.clipboard = []
@@ -361,37 +357,14 @@ class PilotFSMain(Screen):
     
     # OK Button Long Press Detection
     def ok_pressed(self):
-        """Handle OK button press - WITH LONG PRESS DETECTION"""
-        if self.config.plugins.pilotfs.enable_smart_context.value:
-            # Start long press detection
-            self.ok_press_time = time.time()
-            self.ok_long_press_detected = False
-            self.ok_timer.start(int(self.ok_long_press_threshold * 1000), True)
-        else:
-            self.execute_ok_navigation()
-    
-    def check_ok_long_press(self):
-        """Check if OK button is still pressed for long press"""
-        current_time = time.time()
-        if current_time - self.ok_press_time >= self.ok_long_press_threshold:
-            self.ok_long_press_detected = True
-            self.ok_timer.stop()
-            # Show context menu on long press
-            self.context_menu.show_context_menu()
-    
-    def ok_released(self):
-        """Handle OK button release (not directly bound, but concept)"""
-        if self.ok_long_press_detected:
-            # Long press was handled, don't execute normal navigation
-            self.ok_long_press_detected = False
-            return
-        
-        # Short press - execute normal navigation
-        self.ok_timer.stop()
+        """Handle OK button press - SIMPLE NAVIGATION"""
+        # Long press disabled - always navigate immediately
         self.execute_ok_navigation()
     
+
+
     def execute_ok_navigation(self):
-        """Execute navigation (enter folder or open file)"""
+        """Execute navigation - PERFECT SMART BEHAVIOR"""
         try:
             sel = self.active_pane.getSelection()
             if not sel or not sel[0]:
@@ -400,33 +373,52 @@ class PilotFSMain(Screen):
             path = sel[0]
             
             if os.path.isdir(path):
-                # Enter directory
+                # Folders: Enter directory
                 self.active_pane.changeDir(path)
                 self.update_ui()
             else:
-                # Check if file type should show smart context menu
+                # Files: Smart behavior based on type
                 ext = os.path.splitext(path)[1].lower()
                 
-                # File types that trigger smart context menu on OK
-                smart_menu_extensions = [
-                    '.sh',                                    # Shell scripts
-                    '.zip', '.tar', '.tar.gz', '.tgz', '.rar', '.7z', '.gz',  # Archives
-                    '.ipk',                                   # IPK packages
-                    '.mp4', '.mkv', '.avi', '.ts', '.m2ts', '.mov',  # Video
-                    '.mp3', '.flac', '.wav', '.aac', '.ogg',  # Audio
-                ]
+                # === PLAY DIRECTLY (NO MENU) ===
+                # Video files: PLAY
+                if ext in ['.mp4', '.mkv', '.avi', '.ts', '.m2ts', '.mov', '.m4v', '.mpg', '.mpeg', '.wmv', '.flv']:
+                    self.preview_media()
                 
-                if ext in smart_menu_extensions:
-                    # Show smart context menu
+                # Audio files: PLAY
+                elif ext in ['.mp3', '.flac', '.wav', '.aac', '.ogg', '.m4a', '.wma', '.ac3', '.dts']:
+                    self.preview_media()
+                
+                # === SHOW SMART CONTEXT MENU ===
+                # Script files: Show menu (Run/View/Edit)
+                elif ext in ['.sh', '.py', '.pl']:
                     self.context_menu.show_smart_context_menu(path)
-                else:
-                    # Default behavior: preview file
+                
+                # Archive files: Show menu (Extract/View)
+                elif ext in ['.zip', '.tar', '.tar.gz', '.tgz', '.rar', '.7z', '.gz']:
+                    self.context_menu.show_smart_context_menu(path)
+                
+                # IPK packages: Show menu (Install/View)
+                elif ext == '.ipk':
+                    self.context_menu.show_smart_context_menu(path)
+                
+                # === PREVIEW DIRECTLY ===
+                # Text files: Preview
+                elif ext in ['.txt', '.log', '.conf', '.cfg', '.ini', '.xml', '.json', '.md']:
                     self.preview_file()
+                
+                # Image files: Preview
+                elif ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff']:
+                    self.dialogs.preview_image(path, self.file_ops)
+                
+                # Default: Show file info
+                else:
+                    self.show_file_info()
+                    
         except Exception as e:
             logger.error(f"Error in OK navigation: {e}")
             self.dialogs.show_message(f"Navigation error: {e}", type="error")
-    
-    # Navigation Methods
+
     def up(self):
         """Move up in file list"""
         try:
