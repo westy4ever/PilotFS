@@ -5,7 +5,7 @@ import random
 import stat
 from datetime import datetime
 from ..constants import TRASH_PATH
-from ..exceptions import FileOperationError, DiskSpaceError, PermissionError
+from ..exceptions import FileOperationError, DiskSpaceError
 from ..utils.formatters import format_size
 from ..utils.validators import validate_path
 
@@ -89,10 +89,13 @@ class FileOperations:
             dest_path = self._get_unique_path(source, destination)
             
             # Check disk space if moving to different device
-            src_device = os.stat(source).st_dev
-            dest_device = os.stat(os.path.dirname(dest_path)).st_dev
-            if src_device != dest_device:
-                self._check_disk_space(source, os.path.dirname(dest_path))
+            try:
+                src_device = os.stat(source).st_dev
+                dest_device = os.stat(os.path.dirname(dest_path)).st_dev
+                if src_device != dest_device:
+                    self._check_disk_space(source, os.path.dirname(dest_path))
+            except:
+                pass  # If we can't check devices, proceed anyway
             
             shutil.move(source, dest_path)
             
@@ -155,7 +158,6 @@ class FileOperations:
         """Rename file or directory"""
         try:
             validate_path(old_path)
-            validate_path(new_name, is_filename=True)
             
             if not os.path.exists(old_path):
                 raise FileOperationError(f"Path does not exist: {old_path}")
@@ -171,7 +173,7 @@ class FileOperations:
             # Update cache
             if self.cache:
                 old_key = f"file_size_{hash(old_path)}"
-                if old_key in self.cache:
+                if self.cache and old_key in self.cache:
                     size = self.cache.get(old_key)
                     self.cache.delete(old_key)
                     self.cache.set(f"file_size_{hash(new_path)}", size)
@@ -185,7 +187,6 @@ class FileOperations:
         """Create new directory"""
         try:
             validate_path(path)
-            validate_path(name, is_filename=True)
             
             new_path = os.path.join(path, name)
             
@@ -202,7 +203,6 @@ class FileOperations:
         """Create new file"""
         try:
             validate_path(path)
-            validate_path(name, is_filename=True)
             
             new_path = os.path.join(path, name)
             
@@ -223,32 +223,12 @@ class FileOperations:
             if not os.path.exists(path):
                 return 0
             
-            # For directories, return 0 immediately (too slow to calculate)
+            # For directories, return 0 immediately (too slow to calculate for UI)
             if os.path.isdir(path):
                 return 0
             
             # For files, just get the size directly
             return os.path.getsize(path)
-            
-        except Exception:
-            return 0
-            
-            cache_key = f"file_size_{hash(path)}"
-            
-            if use_cache and self.cache:
-                cached = self.cache.get(cache_key)
-                if cached is not None:
-                    return cached
-            
-            if os.path.isdir(path):
-                size = self._get_directory_size(path)
-            else:
-                size = os.path.getsize(path)
-            
-            if use_cache and self.cache:
-                self.cache.set(cache_key, size)
-            
-            return size
             
         except Exception:
             return 0
@@ -320,9 +300,23 @@ class FileOperations:
     def _check_disk_space(self, source, destination):
         """Check if enough disk space is available"""
         try:
+            if not os.path.exists(destination):
+                return True
+            
             st = os.statvfs(destination)
             free = st.f_bavail * st.f_frsize
-            needed = self.get_file_size(source, use_cache=False)
+            
+            # For directories, estimate size more efficiently
+            if os.path.isdir(source):
+                # Don't calculate exact directory size (too slow)
+                # Just check if there's at least 1GB free
+                if free < (1024**3):  # 1GB
+                    raise DiskSpaceError(
+                        f"Insufficient space for large directory! Free: {free / (1024**3):.2f} GB"
+                    )
+                return True
+            else:
+                needed = os.path.getsize(source)
             
             if needed > free:
                 needed_gb = needed / (1024**3)
@@ -341,11 +335,14 @@ class FileOperations:
     def _get_unique_path(self, source, destination):
         """Generate unique path if destination exists"""
         base = os.path.basename(source)
-        dest_dir = destination if os.path.isdir(destination) else os.path.dirname(destination)
         
+        # If destination is a directory, create path inside it
         if os.path.isdir(destination):
+            dest_dir = destination
             dest_path = os.path.join(destination, base)
         else:
+            # Destination is a file path
+            dest_dir = os.path.dirname(destination)
             dest_path = destination
         
         if not os.path.exists(dest_path):

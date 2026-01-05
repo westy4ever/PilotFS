@@ -6,7 +6,7 @@ from Components.ConfigList import ConfigListScreen
 from Components.config import config, getConfigListEntry
 from enigma import getDesktop
 
-from ..core import PilotFSConfig
+from ..core.config import PilotFSConfig
 from ..utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -16,10 +16,6 @@ class PilotFSSetup(ConfigListScreen, Screen):
         Screen.__init__(self, session)
         
         # Get screen dimensions
-        w, h = getDesktop(0).size().width(), getDesktop(0).size().height()
-        
-        # Setup skin
-                # Get screen dimensions for responsive sizing
         desktop_w, desktop_h = getDesktop(0).size().width(), getDesktop(0).size().height()
         
         # Make settings panel 85% of screen size for better visibility
@@ -109,7 +105,7 @@ class PilotFSSetup(ConfigListScreen, Screen):
         self.list = []
         
         # === GENERAL SETTINGS ===
-        self.list.append(getConfigListEntry("    ══════ General Settings ══════", config.plugins.pilotfs.left_path))  # Dummy entry for header
+        self.list.append(getConfigListEntry("══════ General Settings ══════", config.plugins.pilotfs.left_path))  # Dummy entry for header
         
         self.list.append(getConfigListEntry("Default Left Path:", 
                      config.plugins.pilotfs.left_path))
@@ -125,7 +121,7 @@ class PilotFSSetup(ConfigListScreen, Screen):
                      config.plugins.pilotfs.right_sort_mode))
         
         # === CONTEXT MENU SETTINGS ===
-        self.list.append(getConfigListEntry("    ══════ Context Menu Settings ══════", config.plugins.pilotfs.left_path))  # Dummy entry
+        self.list.append(getConfigListEntry("══════ Context Menu Settings ══════", config.plugins.pilotfs.left_path))  # Dummy entry
         
         self.list.append(getConfigListEntry("Enable Smart Context Menus:", 
                      config.plugins.pilotfs.enable_smart_context))
@@ -135,7 +131,7 @@ class PilotFSSetup(ConfigListScreen, Screen):
                      config.plugins.pilotfs.group_tools_menu))
         
         # === FILE OPERATIONS ===
-        self.list.append(getConfigListEntry("    ══════ File Operations ══════", config.plugins.pilotfs.left_path))  # Dummy entry
+        self.list.append(getConfigListEntry("══════ File Operations ══════", config.plugins.pilotfs.left_path))  # Dummy entry
         
         self.list.append(getConfigListEntry("Enable Trash:", 
                      config.plugins.pilotfs.trash_enabled))
@@ -145,7 +141,7 @@ class PilotFSSetup(ConfigListScreen, Screen):
                      config.plugins.pilotfs.preview_size))
         
         # === EXIT BEHAVIOR ===
-        self.list.append(getConfigListEntry("    ══════ Exit Behavior ══════", config.plugins.pilotfs.left_path))  # Dummy entry
+        self.list.append(getConfigListEntry("══════ Exit Behavior ══════", config.plugins.pilotfs.left_path))  # Dummy entry
         
         self.list.append(getConfigListEntry("Save Left Path on Exit:", 
                      config.plugins.pilotfs.save_left_on_exit))
@@ -153,7 +149,7 @@ class PilotFSSetup(ConfigListScreen, Screen):
                      config.plugins.pilotfs.save_right_on_exit))
         
         # === MEDIA PLAYER ===
-        self.list.append(getConfigListEntry("    ══════ Media Player ══════", config.plugins.pilotfs.left_path))  # Dummy entry
+        self.list.append(getConfigListEntry("══════ Media Player ══════", config.plugins.pilotfs.left_path))  # Dummy entry
         
         self.list.append(getConfigListEntry("Use Internal Player:", 
                      config.plugins.pilotfs.use_internal_player))
@@ -161,7 +157,7 @@ class PilotFSSetup(ConfigListScreen, Screen):
                      config.plugins.pilotfs.fallback_to_external))
         
         # === REMOTE ACCESS ===
-        self.list.append(getConfigListEntry("    ══════ Remote Access ══════", config.plugins.pilotfs.left_path))  # Dummy entry
+        self.list.append(getConfigListEntry("══════ Remote Access ══════", config.plugins.pilotfs.left_path))  # Dummy entry
         
         self.list.append(getConfigListEntry("Remote IP for Mount:", 
                      config.plugins.pilotfs.remote_ip))
@@ -212,90 +208,117 @@ class PilotFSSetup(ConfigListScreen, Screen):
         if not result:
             return
         
-        # General settings
-        config.plugins.pilotfs.left_path.value = "/media/hdd/"
-        config.plugins.pilotfs.right_path.value = "/"
-        config.plugins.pilotfs.starting_pane.value = "left"
-        config.plugins.pilotfs.show_dirs_first.value = "yes"
-        config.plugins.pilotfs.left_sort_mode.value = "name"
-        config.plugins.pilotfs.right_sort_mode.value = "name"
-        
-        # Context menu settings
-        config.plugins.pilotfs.enable_smart_context.value = True
-        config.plugins.pilotfs.ok_long_press_time.value = 400
-        config.plugins.pilotfs.group_tools_menu.value = True
-        
-        # File operations
-        config.plugins.pilotfs.trash_enabled.value = "yes"
-        config.plugins.pilotfs.cache_enabled.value = True
-        config.plugins.pilotfs.preview_size.value = "1024"
-        
-        # Exit behavior
-        config.plugins.pilotfs.save_left_on_exit.value = "yes"
-        config.plugins.pilotfs.save_right_on_exit.value = "yes"
-        
-        # Media player
-        config.plugins.pilotfs.use_internal_player.value = True
-        config.plugins.pilotfs.fallback_to_external.value = True
-        
-        # Remote access
-        config.plugins.pilotfs.remote_ip.value = "192.168.1.10"
-        config.plugins.pilotfs.ftp_host.value = ""
-        config.plugins.pilotfs.ftp_port.value = 21
-        config.plugins.pilotfs.ftp_user.value = "anonymous"
-        config.plugins.pilotfs.ftp_pass.value = ""
-        config.plugins.pilotfs.sftp_host.value = ""
-        config.plugins.pilotfs.sftp_port.value = 22
-        config.plugins.pilotfs.sftp_user.value = "root"
-        config.plugins.pilotfs.sftp_pass.value = ""
-        config.plugins.pilotfs.webdav_url.value = ""
-        config.plugins.pilotfs.webdav_user.value = ""
-        config.plugins.pilotfs.webdav_pass.value = ""
-        
-        # Save all
-        for item in self.list:
-            if hasattr(item[1], 'save'):
-                item[1].save()
-        
-        # Reinitialize the list
-        self.init_config_list()
-        
-        self.session.open(
-            MessageBox,
-            "Defaults loaded successfully!",
-            MessageBox.TYPE_INFO,
-            timeout=2
-        )
-        
-        logger.info("Configuration reset to defaults")
+        try:
+            # General settings
+            config.plugins.pilotfs.left_path.value = "/media/hdd/"
+            config.plugins.pilotfs.right_path.value = "/"
+            config.plugins.pilotfs.starting_pane.value = "left"
+            config.plugins.pilotfs.show_dirs_first.value = "yes"
+            config.plugins.pilotfs.left_sort_mode.value = "name"
+            config.plugins.pilotfs.right_sort_mode.value = "name"
+            
+            # Context menu settings
+            config.plugins.pilotfs.enable_smart_context.value = True
+            config.plugins.pilotfs.ok_long_press_time.value = 400
+            config.plugins.pilotfs.group_tools_menu.value = True
+            
+            # File operations
+            config.plugins.pilotfs.trash_enabled.value = "yes"
+            config.plugins.pilotfs.cache_enabled.value = True
+            config.plugins.pilotfs.preview_size.value = "1024"
+            
+            # Exit behavior
+            config.plugins.pilotfs.save_left_on_exit.value = "yes"
+            config.plugins.pilotfs.save_right_on_exit.value = "yes"
+            
+            # Media player
+            config.plugins.pilotfs.use_internal_player.value = True
+            config.plugins.pilotfs.fallback_to_external.value = True
+            
+            # Remote access
+            config.plugins.pilotfs.remote_ip.value = "192.168.1.10"
+            config.plugins.pilotfs.ftp_host.value = ""
+            config.plugins.pilotfs.ftp_port.value = 21
+            config.plugins.pilotfs.ftp_user.value = "anonymous"
+            config.plugins.pilotfs.ftp_pass.value = ""
+            config.plugins.pilotfs.sftp_host.value = ""
+            config.plugins.pilotfs.sftp_port.value = 22
+            config.plugins.pilotfs.sftp_user.value = "root"
+            config.plugins.pilotfs.sftp_pass.value = ""
+            config.plugins.pilotfs.webdav_url.value = ""
+            config.plugins.pilotfs.webdav_user.value = ""
+            config.plugins.pilotfs.webdav_pass.value = ""
+            
+            # Save all
+            for item in self.list:
+                if hasattr(item[1], 'save'):
+                    item[1].save()
+            
+            # Reinitialize the list
+            self.init_config_list()
+            
+            self.session.open(
+                MessageBox,
+                "Defaults loaded successfully!",
+                MessageBox.TYPE_INFO,
+                timeout=2
+            )
+            
+            logger.info("Configuration reset to defaults")
+            
+        except Exception as e:
+            logger.error(f"Error loading defaults: {e}")
+            self.session.open(
+                MessageBox,
+                f"Error loading defaults:\n{e}",
+                MessageBox.TYPE_ERROR
+            )
     
     def key_save(self):
         """Save configuration"""
-        for item in self.list:
-            if hasattr(item[1], 'save'):
-                item[1].save()
-        
-        logger.info("Configuration saved")
-        self.close(True, self.session)
+        try:
+            for item in self.list:
+                if hasattr(item[1], 'save'):
+                    item[1].save()
+            
+            logger.info("Configuration saved")
+            self.close()
+            
+        except Exception as e:
+            logger.error(f"Error saving configuration: {e}")
+            self.session.open(
+                MessageBox,
+                f"Error saving configuration:\n{e}",
+                MessageBox.TYPE_ERROR
+            )
     
     def key_cancel(self):
         """Cancel configuration changes"""
-        for item in self.list:
-            if hasattr(item[1], 'cancel'):
-                item[1].cancel()
-        
-        logger.info("Configuration changes cancelled")
-        self.close(False, self.session)
+        try:
+            for item in self.list:
+                if hasattr(item[1], 'cancel'):
+                    item[1].cancel()
+            
+            logger.info("Configuration changes cancelled")
+            self.close()
+            
+        except Exception as e:
+            logger.error(f"Error cancelling configuration: {e}")
+            self.close()
     
     def keyLeft(self):
         """Handle left key"""
-        ConfigListScreen.keyLeft(self)
-        self.update_help_text()
+        try:
+            ConfigListScreen.keyLeft(self)
+        except Exception as e:
+            logger.error(f"Error in keyLeft: {e}")
     
     def keyRight(self):
         """Handle right key"""
-        ConfigListScreen.keyRight(self)
-        self.update_help_text()
+        try:
+            ConfigListScreen.keyRight(self)
+        except Exception as e:
+            logger.error(f"Error in keyRight: {e}")
     
     def update_help_text(self):
         """Update help text based on selected item"""
@@ -304,7 +327,5 @@ class PilotFSSetup(ConfigListScreen, Screen):
             if current:
                 # Could add context-sensitive help here
                 pass
-        except Exception:
-            pass
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Error updating help text: {e}")

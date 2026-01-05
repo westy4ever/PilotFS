@@ -8,6 +8,7 @@ from Components.ProgressBar import ProgressBar
 from enigma import getDesktop, eTimer
 import threading
 import os
+import time
 
 from ..core.config import PilotFSConfig
 from ..core.file_operations import FileOperations
@@ -148,10 +149,11 @@ class PilotFSMain(Screen):
         self.operation_current = 0
         self.operation_total = 0
         
-        # OK button tracking
+        # OK button tracking - IMPLEMENTED LONG PRESS DETECTION
         self.ok_press_time = 0
         self.ok_long_press_detected = False
         self.ok_timer = eTimer()
+        self.ok_timer.callback.append(self.check_ok_long_press)
         self.ok_long_press_threshold = self.config.plugins.pilotfs.ok_long_press_time.value / 1000.0
         
         # Clipboard
@@ -176,6 +178,9 @@ class PilotFSMain(Screen):
         
         # Filter
         self.filter_pattern = None
+        
+        # Preview state
+        self.preview_in_progress = False
     
     def setup_actions(self):
         """Setup key mappings"""
@@ -253,7 +258,8 @@ class PilotFSMain(Screen):
             # Build text with indicators
             left_text = "◀ LEFT: " + left_dir if is_left_active else "LEFT: " + left_dir
             right_text = "RIGHT: " + right_dir + " ▶" if is_right_active else "RIGHT: " + right_dir
-        except Exception:
+        except Exception as e:
+            logger.error(f"Error getting directory paths: {e}")
             left_text = "◀ LEFT" if is_left_active else "LEFT"
             right_text = "RIGHT ▶" if is_right_active else "RIGHT"
         
@@ -282,7 +288,10 @@ class PilotFSMain(Screen):
     
     def update_status_bar(self):
         """Update status bar text"""
-        marked = [x for x in self.active_pane.list if x[0][3]]
+        try:
+            marked = [x for x in self.active_pane.list if x[0][3]]
+        except Exception:
+            marked = []
         
         if self.operation_in_progress:
             text = f"⚙ OPERATION: {self.operation_current}/{self.operation_total} items..."
@@ -299,14 +308,17 @@ class PilotFSMain(Screen):
     
     def update_path_label(self):
         """Update path label"""
-        current_dir = self.active_pane.getCurrentDirectory()
-        self["path_label"].setText(f"📁 {current_dir}")
+        try:
+            current_dir = self.active_pane.getCurrentDirectory()
+            self["path_label"].setText(f"📁 {current_dir}")
+        except Exception as e:
+            logger.error(f"Error updating path label: {e}")
     
     def update_info_panel(self):
         """Update info panel with current file details - OPTIMIZED"""
-        sel = self.active_pane.getSelection()
-        if sel and sel[0]:
-            try:
+        try:
+            sel = self.active_pane.getSelection()
+            if sel and sel[0]:
                 path = sel[0]
                 name = os.path.basename(path)
                 icon = get_file_icon(path)
@@ -321,20 +333,23 @@ class PilotFSMain(Screen):
                 else:
                     size_str = "DIR"
                 
-                text = "%s %s | %s" % (icon, name, size_str)
+                text = f"{icon} {name} | {size_str}"
                 self["info_panel"].setText(text)
                 return
-            except Exception:
-                pass
+        except Exception as e:
+            logger.debug(f"Error updating info panel: {e}")
         
         self["info_panel"].setText("")
 
     def update_operation_progress(self):
         """Update progress bar during operations"""
-        if self.operation_total > 0:
-            progress = int((self.operation_current / self.operation_total) * 100)
-            self["progress_bar"].setValue(progress)
-        self.update_ui()
+        try:
+            if self.operation_total > 0:
+                progress = int((self.operation_current / self.operation_total) * 100)
+                self["progress_bar"].setValue(progress)
+            self.update_ui()
+        except Exception as e:
+            logger.error(f"Error updating operation progress: {e}")
     
     def update_help_text(self):
         """Update help text"""
@@ -344,105 +359,152 @@ class PilotFSMain(Screen):
             help_text = "OK:Open 0:Info 1-9:BMark CH±:Sort MENU:Tools AUDIO:Storage"
         self["help_text"].setText(help_text)
     
-    # Navigation Methods
+    # OK Button Long Press Detection
     def ok_pressed(self):
-        """Handle OK button press"""
+        """Handle OK button press - WITH LONG PRESS DETECTION"""
         if self.config.plugins.pilotfs.enable_smart_context.value:
-            # TODO: Implement long press detection
-            self.execute_ok_navigation()
+            # Start long press detection
+            self.ok_press_time = time.time()
+            self.ok_long_press_detected = False
+            self.ok_timer.start(int(self.ok_long_press_threshold * 1000), True)
         else:
             self.execute_ok_navigation()
+    
+    def check_ok_long_press(self):
+        """Check if OK button is still pressed for long press"""
+        current_time = time.time()
+        if current_time - self.ok_press_time >= self.ok_long_press_threshold:
+            self.ok_long_press_detected = True
+            self.ok_timer.stop()
+            # Show context menu on long press
+            self.context_menu.show_context_menu()
+    
+    def ok_released(self):
+        """Handle OK button release (not directly bound, but concept)"""
+        if self.ok_long_press_detected:
+            # Long press was handled, don't execute normal navigation
+            self.ok_long_press_detected = False
+            return
+        
+        # Short press - execute normal navigation
+        self.ok_timer.stop()
+        self.execute_ok_navigation()
     
     def execute_ok_navigation(self):
         """Execute navigation (enter folder or open file)"""
-        sel = self.active_pane.getSelection()
-        if not sel or not sel[0]:
-            return
-        
-        path = sel[0]
-        
-        if os.path.isdir(path):
-            # Enter directory
-            self.active_pane.changeDir(path)
-            self.update_ui()
-        else:
-            # Check if file type should show smart context menu
-            ext = os.path.splitext(path)[1].lower()
+        try:
+            sel = self.active_pane.getSelection()
+            if not sel or not sel[0]:
+                return
             
-            # File types that trigger smart context menu on OK
-            smart_menu_extensions = [
-                '.sh',                                    # Shell scripts
-                '.zip', '.tar', '.tar.gz', '.tgz', '.rar', '.7z', '.gz',  # Archives
-                '.ipk',                                   # IPK packages
-                '.mp4', '.mkv', '.avi', '.ts', '.m2ts', '.mov',  # Video
-                '.mp3', '.flac', '.wav', '.aac', '.ogg',  # Audio
-            ]
+            path = sel[0]
             
-            if ext in smart_menu_extensions:
-                # Show smart context menu
-                self.context_menu.show_smart_context_menu(path)
+            if os.path.isdir(path):
+                # Enter directory
+                self.active_pane.changeDir(path)
+                self.update_ui()
             else:
-                # Default behavior: preview file
-                self.preview_file()
+                # Check if file type should show smart context menu
+                ext = os.path.splitext(path)[1].lower()
+                
+                # File types that trigger smart context menu on OK
+                smart_menu_extensions = [
+                    '.sh',                                    # Shell scripts
+                    '.zip', '.tar', '.tar.gz', '.tgz', '.rar', '.7z', '.gz',  # Archives
+                    '.ipk',                                   # IPK packages
+                    '.mp4', '.mkv', '.avi', '.ts', '.m2ts', '.mov',  # Video
+                    '.mp3', '.flac', '.wav', '.aac', '.ogg',  # Audio
+                ]
+                
+                if ext in smart_menu_extensions:
+                    # Show smart context menu
+                    self.context_menu.show_smart_context_menu(path)
+                else:
+                    # Default behavior: preview file
+                    self.preview_file()
+        except Exception as e:
+            logger.error(f"Error in OK navigation: {e}")
+            self.dialogs.show_message(f"Navigation error: {e}", type="error")
+    
+    # Navigation Methods
     def up(self):
         """Move up in file list"""
-        self.active_pane.up()
-        self.update_info_panel()  # Fast update
+        try:
+            self.active_pane.up()
+            self.update_info_panel()  # Fast update
+        except Exception as e:
+            logger.error(f"Error moving up: {e}")
     
     def down(self):
         """Move down in file list"""
-        self.active_pane.down()
-        self.update_info_panel()  # Fast update
+        try:
+            self.active_pane.down()
+            self.update_info_panel()  # Fast update
+        except Exception as e:
+            logger.error(f"Error moving down: {e}")
     
     def focus_left(self):
         """Switch focus to left pane"""
-        self.active_pane = self["left_pane"]
-        self.inactive_pane = self["right_pane"]
-        self.update_ui()
-        self.update_help_text()
+        try:
+            self.active_pane = self["left_pane"]
+            self.inactive_pane = self["right_pane"]
+            self.update_ui()
+            self.update_help_text()
+        except Exception as e:
+            logger.error(f"Error focusing left pane: {e}")
     
     def focus_right(self):
         """Switch focus to right pane"""
-        self.active_pane = self["right_pane"]
-        self.inactive_pane = self["left_pane"]
-        self.update_ui()
-        self.update_help_text()
+        try:
+            self.active_pane = self["right_pane"]
+            self.inactive_pane = self["left_pane"]
+            self.update_ui()
+            self.update_help_text()
+        except Exception as e:
+            logger.error(f"Error focusing right pane: {e}")
     
     # File Operations
     def toggle_selection(self):
         """Toggle file selection"""
         if not self.operation_in_progress:
-            self.active_pane.toggleSelection()
-            self.update_ui()
+            try:
+                self.active_pane.toggleSelection()
+                self.update_ui()
+            except Exception as e:
+                logger.error(f"Error toggling selection: {e}")
     
     def delete_request(self):
         """Request file deletion - RED button"""
-        # Check for multi-selected files first
-        marked = [x for x in self.active_pane.list if x[0][3]]
-        
-        if marked:
-            # Multi-select delete
-            files = [x[0][0] for x in marked]
-            self.dialogs.show_confirmation(
-                "Delete %d selected items?\n\nThis cannot be undone!" % len(files),
-                lambda res: self._execute_delete_multiple(res, files) if res else None
-            )
-        else:
-            # Single file delete
-            sel = self.active_pane.getSelection()
-            if not sel or not sel[0]:
-                self.dialogs.show_message("No file selected!", type="info")
-                return
+        try:
+            # Check for multi-selected files first
+            marked = [x for x in self.active_pane.list if x[0][3]]
             
-            item_path = sel[0]
-            item_name = os.path.basename(item_path)
-            is_dir = os.path.isdir(item_path)
-            item_type = "folder" if is_dir else "file"
-            
-            self.dialogs.show_confirmation(
-                "Delete %s '%s'?\n\nThis cannot be undone!" % (item_type, item_name),
-                lambda res: self._execute_delete(res, item_path, item_name) if res else None
-            )
+            if marked:
+                # Multi-select delete
+                files = [x[0][0] for x in marked]
+                self.dialogs.show_confirmation(
+                    f"Delete {len(files)} selected items?\n\nThis cannot be undone!",
+                    lambda res: self._execute_delete_multiple(res, files) if res else None
+                )
+            else:
+                # Single file delete
+                sel = self.active_pane.getSelection()
+                if not sel or not sel[0]:
+                    self.dialogs.show_message("No file selected!", type="info")
+                    return
+                
+                item_path = sel[0]
+                item_name = os.path.basename(item_path)
+                is_dir = os.path.isdir(item_path)
+                item_type = "folder" if is_dir else "file"
+                
+                self.dialogs.show_confirmation(
+                    f"Delete {item_type} '{item_name}'?\n\nThis cannot be undone!",
+                    lambda res: self._execute_delete(res, item_path, item_name) if res else None
+                )
+        except Exception as e:
+            logger.error(f"Error in delete request: {e}")
+            self.dialogs.show_message(f"Delete error: {e}", type="error")
     
     def _execute_delete(self, confirmed, item_path, item_name):
         """Execute deletion"""
@@ -455,42 +517,47 @@ class PilotFSMain(Screen):
             self.update_ui()
             
             if self.config.plugins.pilotfs.trash_enabled.value == "yes":
-                msg = "Moved to trash: " + item_name
+                msg = f"Moved to trash: {item_name}"
             else:
-                msg = "Permanently deleted: " + item_name
+                msg = f"Permanently deleted: {item_name}"
             
             self.dialogs.show_message(msg, type="info", timeout=2)
         except Exception as e:
-            self.dialogs.show_message("Delete failed: " + str(e), type="error")
+            logger.error(f"Error executing delete: {e}")
+            self.dialogs.show_message(f"Delete failed: {e}", type="error")
     
     def rename_request(self):
         """Request file rename - GREEN button"""
-        # Check for multi-selected files
-        marked = [x for x in self.active_pane.list if x[0][3]]
-        
-        if len(marked) > 1:
-            # Multi-select - redirect to bulk rename
-            self.dialogs.show_message(
-                "Multiple files selected (%d items)\n\nUse MENU -> Tools -> Bulk Rename\nfor renaming multiple files" % len(marked),
-                type="info"
+        try:
+            # Check for multi-selected files
+            marked = [x for x in self.active_pane.list if x[0][3]]
+            
+            if len(marked) > 1:
+                # Multi-select - redirect to bulk rename
+                self.dialogs.show_message(
+                    f"Multiple files selected ({len(marked)} items)\n\nUse MENU -> Tools -> Bulk Rename\nfor renaming multiple files",
+                    type="info"
+                )
+                return
+            
+            # Single file rename
+            sel = self.active_pane.getSelection()
+            if not sel or not sel[0]:
+                self.dialogs.show_message("No file selected!", type="info")
+                return
+            
+            item_path = sel[0]
+            current_name = os.path.basename(item_path)
+            
+            self.session.openWithCallback(
+                lambda new_name: self._execute_rename(new_name, item_path, current_name) if new_name else None,
+                VirtualKeyBoard,
+                title="Enter new name:",
+                text=current_name
             )
-            return
-        
-        # Single file rename
-        sel = self.active_pane.getSelection()
-        if not sel or not sel[0]:
-            self.dialogs.show_message("No file selected!", type="info")
-            return
-        
-        item_path = sel[0]
-        current_name = os.path.basename(item_path)
-        
-        self.session.openWithCallback(
-            lambda new_name: self._execute_rename(new_name, item_path, current_name) if new_name else None,
-            VirtualKeyBoard,
-            title="Enter new name:",
-            text=current_name
-        )
+        except Exception as e:
+            logger.error(f"Error in rename request: {e}")
+            self.dialogs.show_message(f"Rename error: {e}", type="error")
     
     def _execute_rename(self, new_name, old_path, old_name):
         """Execute rename"""
@@ -501,42 +568,50 @@ class PilotFSMain(Screen):
             new_path = self.file_ops.rename(old_path, new_name)
             self.active_pane.refresh()
             self.update_ui()
-            self.dialogs.show_message("Renamed to: " + new_name, type="info", timeout=2)
+            self.dialogs.show_message(f"Renamed to: {new_name}", type="info", timeout=2)
         except Exception as e:
-            self.dialogs.show_message("Rename failed: " + str(e), type="error")
+            logger.error(f"Error executing rename: {e}")
+            self.dialogs.show_message(f"Rename failed: {e}", type="error")
     
     def quick_copy(self):
         """Quick copy/move operation"""
-        if self.clipboard:
-            self.paste_from_clipboard()
-            return
-        
-        # Get destination
-        if self.active_pane == self["left_pane"]:
-            dest_pane = self["right_pane"]
-        else:
-            dest_pane = self["left_pane"]
-        
-        dest = dest_pane.getCurrentDirectory()
-        files = self.get_selected_files()
-        
-        if not files:
-            self.dialogs.show_message("No files selected!", type="info")
-            return
-        
-        self.dialogs.show_transfer_dialog(files, dest, self.execute_transfer)
+        try:
+            if self.clipboard:
+                self.paste_from_clipboard()
+                return
+            
+            # Get destination
+            if self.active_pane == self["left_pane"]:
+                dest_pane = self["right_pane"]
+            else:
+                dest_pane = self["left_pane"]
+            
+            dest = dest_pane.getCurrentDirectory()
+            files = self.get_selected_files()
+            
+            if not files:
+                self.dialogs.show_message("No files selected!", type="info")
+                return
+            
+            self.dialogs.show_transfer_dialog(files, dest, self.execute_transfer)
+        except Exception as e:
+            logger.error(f"Error in quick copy: {e}")
+            self.dialogs.show_message(f"Copy error: {e}", type="error")
     
     def get_selected_files(self):
         """Get selected files"""
         files = []
-        for item in self.active_pane.list:
-            if item[0][3]:  # Marked
-                files.append(item[0][0])
-        
-        if not files:
-            sel = self.active_pane.getSelection()
-            if sel and sel[0]:
-                files.append(sel[0])
+        try:
+            for item in self.active_pane.list:
+                if item[0][3]:  # Marked
+                    files.append(item[0][0])
+            
+            if not files:
+                sel = self.active_pane.getSelection()
+                if sel and sel[0]:
+                    files.append(sel[0])
+        except Exception as e:
+            logger.error(f"Error getting selected files: {e}")
         
         return files
     
@@ -545,19 +620,23 @@ class PilotFSMain(Screen):
         if not self.clipboard:
             return
         
-        dest = self.active_pane.getCurrentDirectory()
-        
-        if not os.path.isdir(dest):
-            self.dialogs.show_message(f"Invalid destination: {dest}", type="error")
-            return
-        
-        mode = "cp" if self.clipboard_mode == "copy" else "mv"
-        action = "Copy" if mode == "cp" else "Move"
-        
-        self.dialogs.show_confirmation(
-            f"{action} {len(self.clipboard)} items to:\n{dest}?",
-            lambda res: self.execute_paste(res, mode, self.clipboard[:], dest)
-        )
+        try:
+            dest = self.active_pane.getCurrentDirectory()
+            
+            if not os.path.isdir(dest):
+                self.dialogs.show_message(f"Invalid destination: {dest}", type="error")
+                return
+            
+            mode = "cp" if self.clipboard_mode == "copy" else "mv"
+            action = "Copy" if mode == "cp" else "Move"
+            
+            self.dialogs.show_confirmation(
+                f"{action} {len(self.clipboard)} items to:\n{dest}?",
+                lambda res: self.execute_paste(res, mode, self.clipboard[:], dest)
+            )
+        except Exception as e:
+            logger.error(f"Error pasting from clipboard: {e}")
+            self.dialogs.show_message(f"Paste error: {e}", type="error")
     
     def execute_paste(self, confirmed, mode, files, dest):
         """Execute paste operation"""
@@ -570,16 +649,22 @@ class PilotFSMain(Screen):
                 return
             self.operation_in_progress = True
         
-        self.operation_current = 0
-        self.operation_total = len(files)
-        self.operation_timer.start(500)
-        
-        thread = threading.Thread(
-            target=self._perform_paste,
-            args=(mode, files, dest),
-            daemon=True
-        )
-        thread.start()
+        try:
+            self.operation_current = 0
+            self.operation_total = len(files)
+            self.operation_timer.start(500)
+            
+            thread = threading.Thread(
+                target=self._perform_paste,
+                args=(mode, files, dest),
+                daemon=True
+            )
+            thread.start()
+        except Exception as e:
+            logger.error(f"Error starting paste operation: {e}")
+            with self.operation_lock:
+                self.operation_in_progress = False
+            self.dialogs.show_message(f"Paste failed: {e}", type="error")
     
     def _perform_paste(self, mode, files, dest):
         """Perform paste operation in thread"""
@@ -630,16 +715,22 @@ class PilotFSMain(Screen):
                 return
             self.operation_in_progress = True
         
-        self.operation_current = 0
-        self.operation_total = len(files)
-        self.operation_timer.start(500)
-        
-        thread = threading.Thread(
-            target=self._perform_transfer,
-            args=(mode, files, dest),
-            daemon=True
-        )
-        thread.start()
+        try:
+            self.operation_current = 0
+            self.operation_total = len(files)
+            self.operation_timer.start(500)
+            
+            thread = threading.Thread(
+                target=self._perform_transfer,
+                args=(mode, files, dest),
+                daemon=True
+            )
+            thread.start()
+        except Exception as e:
+            logger.error(f"Error starting transfer operation: {e}")
+            with self.operation_lock:
+                self.operation_in_progress = False
+            self.dialogs.show_message(f"Transfer failed: {e}", type="error")
     
     def _perform_transfer(self, mode, files, dest):
         """Perform transfer in thread"""
@@ -684,85 +775,125 @@ class PilotFSMain(Screen):
             self.dialogs.show_message("Please wait for current operation to complete!", type="info")
             return
         
-        self.context_menu.show_tools_menu()
+        try:
+            self.context_menu.show_tools_menu()
+        except Exception as e:
+            logger.error(f"Error opening tools menu: {e}")
+            self.dialogs.show_message(f"Tools menu error: {e}", type="error")
     
     def zero_pressed(self):
         """0 button - Show context menu"""
-        if not self.config.plugins.pilotfs.enable_smart_context.value:
-            self.show_file_info()
-            return
-        
-        marked = [x for x in self.active_pane.list if x[0][3]]
-        
-        if marked:
-            self.context_menu.show_multi_selection_context_menu(marked)
-        else:
-            self.context_menu.show_context_menu()
+        try:
+            if not self.config.plugins.pilotfs.enable_smart_context.value:
+                self.show_file_info()
+                return
+            
+            marked = [x for x in self.active_pane.list if x[0][3]]
+            
+            if marked:
+                self.context_menu.show_multi_selection_context_menu(marked)
+            else:
+                self.context_menu.show_context_menu()
+        except Exception as e:
+            logger.error(f"Error in zero pressed: {e}")
+            self.dialogs.show_message(f"Context menu error: {e}", type="error")
     
     def quick_bookmark(self, num):
         """Quick bookmark access"""
-        key = str(num)
-        if key in self.bookmarks:
-            path = self.bookmarks[key]
-            if os.path.isdir(path):
-                self.active_pane.changeDir(path)
-                self.update_ui()
-                self["status_bar"].setText(f"Jumped to bookmark {num}: {os.path.basename(path)}")
+        try:
+            key = str(num)
+            if key in self.bookmarks:
+                path = self.bookmarks[key]
+                if os.path.isdir(path):
+                    self.active_pane.changeDir(path)
+                    self.update_ui()
+                    self["status_bar"].setText(f"Jumped to bookmark {num}: {os.path.basename(path)}")
+                else:
+                    self.dialogs.show_message(f"Bookmark {num} path not found: {path}", type="error")
             else:
-                self.dialogs.show_message(f"Bookmark {num} path not found: {path}", type="error")
-        else:
-            current = self.active_pane.getCurrentDirectory()
-            self.bookmarks[key] = current
-            self.config.save_bookmarks(self.bookmarks)
-            self.dialogs.show_message(f"Bookmark {num} set to:\n{current}", type="info", timeout=2)
+                current = self.active_pane.getCurrentDirectory()
+                self.bookmarks[key] = current
+                self.config.save_bookmarks(self.bookmarks)
+                self.dialogs.show_message(f"Bookmark {num} set to:\n{current}", type="info", timeout=2)
+        except Exception as e:
+            logger.error(f"Error in quick bookmark: {e}")
+            self.dialogs.show_message(f"Bookmark error: {e}", type="error")
     
     def preview_file(self):
         """Preview file contents"""
-        sel = self.active_pane.getSelection()
-        if not sel or not sel[0]:
-            return
-        
-        file_path = sel[0]
-        
-        if os.path.isdir(file_path):
-            self.dialogs.show_message("Cannot preview directory!\n\nPress OK to enter folder.", type="info")
-            return
-        
-        # Check file size
         try:
-            size = self.file_ops.get_file_size(file_path)
-            max_size = int(self.config.plugins.pilotfs.preview_size.value) * 1024
-            if size > max_size:
+            sel = self.active_pane.getSelection()
+            if not sel or not sel[0]:
+                return
+            
+            file_path = sel[0]
+            
+            if os.path.isdir(file_path):
+                self.dialogs.show_message("Cannot preview directory!\n\nPress OK to enter folder.", type="info")
+                return
+            
+            # Check file size
+            try:
+                size = self.file_ops.get_file_size(file_path)
+                max_size = int(self.config.plugins.pilotfs.preview_size.value) * 1024
+                if size > max_size:
+                    self.dialogs.show_message(
+                        f"File too large to preview!\n\nSize: {format_size(size)}\nLimit: {format_size(max_size)}",
+                        type="info"
+                    )
+                    return
+            except:
+                pass
+            
+            # Delegate to dialogs
+            self.dialogs.preview_file(file_path, self.file_ops, self.config)
+        except Exception as e:
+            logger.error(f"Error previewing file: {e}")
+            self.dialogs.show_message(f"Preview error: {e}", type="error")
+    
+    def preview_media(self):
+        """Preview media file - IMPROVED with proper playback"""
+        try:
+            if self.preview_in_progress:
+                self.dialogs.show_message("Media preview already in progress!", type="warning")
+                return
+            
+            sel = self.active_pane.getSelection()
+            if not sel or not sel[0]:
+                return
+            
+            file_path = sel[0]
+            
+            # Check if it's a media file
+            media_extensions = ['.mp4', '.mkv', '.avi', '.ts', '.m2ts', '.mp3', '.flac', '.wav']
+            if not any(file_path.lower().endswith(ext) for ext in media_extensions):
                 self.dialogs.show_message(
-                    f"File too large to preview!\n\nSize: {format_size(size)}\nLimit: {format_size(max_size)}",
+                    "Not a media file!\n\nSupported: MP4, MKV, AVI, TS, MP3, FLAC, etc.",
                     type="info"
                 )
                 return
-        except:
-            pass
-        
-        # Delegate to dialogs
-        self.dialogs.preview_file(file_path, self.file_ops, self.config)
-    
-    def preview_media(self):
-        """Preview media file"""
-        sel = self.active_pane.getSelection()
-        if not sel or not sel[0]:
-            return
-        
-        file_path = sel[0]
-        
-        # Check if it's a media file
-        media_extensions = ['.mp4', '.mkv', '.avi', '.ts', '.m2ts', '.mp3', '.flac', '.wav']
-        if not any(file_path.lower().endswith(ext) for ext in media_extensions):
-            self.dialogs.show_message(
-                "Not a media file!\n\nSupported: MP4, MKV, AVI, TS, MP3, FLAC, etc.",
-                type="info"
-            )
-            return
-        
-        # Delegate to dialogs
-        self.dialogs.preview_media(file_path, self.config)
+            
+            self.preview_in_progress = True
+            
+            # Try to play using Enigma2 service
+            if self.config.plugins.pilotfs.use_internal_player.value:
+                try:
+                    self.play_media_file(file_path)
+                except Exception as e:
+                    logger.error(f"Internal player failed: {e}")
+                    if self.config.plugins.pilotfs.fallback_to_external.value:
+                        self.play_with_external_player(file_path)
+                    else:
+                        self.dialogs.show_message(f"Media playback failed:\n{e}", type="error")
+            else:
+                self.play_with_external_player(file_path)
+            
+            self.preview_in_progress = False
+            
+        except Exception as e:
+            logger.error(f"Error previewing media: {e}")
+            self.preview_in_progress = False
+            self.dialogs.show_message(f"Media preview error: {e}", type="error")
     
     def show_icon_legend(self):
         """Show file type icon legend"""
@@ -784,71 +915,85 @@ class PilotFSMain(Screen):
             self.dialogs.show_message("Please wait for current operation to complete!", type="info")
             return
         
-        self.dialogs.show_storage_selector(self.active_pane.changeDir, self.update_ui)
+        try:
+            self.dialogs.show_storage_selector(self.active_pane.changeDir, self.update_ui)
+        except Exception as e:
+            logger.error(f"Error showing storage selector: {e}")
+            self.dialogs.show_message(f"Storage selector error: {e}", type="error")
     
     def show_file_info(self):
         """Show detailed file information"""
-        sel = self.active_pane.getSelection()
-        if not sel or not sel[0]:
-            return
-        
-        info = self.file_ops.get_file_info(sel[0])
-        if info:
-            text = f"File: {info['name']}\n"
-            text += f"Path: {os.path.dirname(info['path'])}\n"
-            text += f"Size: {info['size_formatted']}\n"
-            text += f"Modified: {info['modified'].strftime('%Y-%m-%d %H:%M:%S')}\n"
-            text += f"Permissions: {info['permissions']}\n"
+        try:
+            sel = self.active_pane.getSelection()
+            if not sel or not sel[0]:
+                return
             
-            if info['is_dir']:
-                text += f"Type: Directory\n"
-                if 'item_count' in info:
-                    text += f"Items: {info['item_count']}\n"
-            else:
-                text += f"Type: File\n"
-            
-            self.dialogs.show_message(text, type="info")
+            info = self.file_ops.get_file_info(sel[0])
+            if info:
+                text = f"File: {info['name']}\n"
+                text += f"Path: {os.path.dirname(info['path'])}\n"
+                text += f"Size: {info['size_formatted']}\n"
+                text += f"Modified: {info['modified'].strftime('%Y-%m-%d %H:%M:%S')}\n"
+                text += f"Permissions: {info['permissions']}\n"
+                
+                if info['is_dir']:
+                    text += f"Type: Directory\n"
+                    if 'item_count' in info:
+                        text += f"Items: {info['item_count']}\n"
+                else:
+                    text += f"Type: File\n"
+                
+                self.dialogs.show_message(text, type="info")
+        except Exception as e:
+            logger.error(f"Error showing file info: {e}")
+            self.dialogs.show_message(f"File info error: {e}", type="error")
     
     # Sorting
     def next_sort(self):
         """Cycle to next sort mode"""
-        if self.active_pane == self["left_pane"]:
-            modes = ["name", "size", "date", "type"]
-            current_idx = modes.index(self.left_sort_mode)
-            self.left_sort_mode = modes[(current_idx + 1) % len(modes)]
-            self.config.plugins.pilotfs.left_sort_mode.value = self.left_sort_mode
-            self.config.plugins.pilotfs.left_sort_mode.save()
-        else:
-            modes = ["name", "size", "date", "type"]
-            current_idx = modes.index(self.right_sort_mode)
-            self.right_sort_mode = modes[(current_idx + 1) % len(modes)]
-            self.config.plugins.pilotfs.right_sort_mode.value = self.right_sort_mode
-            self.config.plugins.pilotfs.right_sort_mode.save()
-        
-        self.apply_sorting()
-        self.update_ui()
-        self.dialogs.show_message(f"Sort: {self.left_sort_mode if self.active_pane == self['left_pane'] else self.right_sort_mode.upper()}", 
-                                 type="info", timeout=1)
+        try:
+            if self.active_pane == self["left_pane"]:
+                modes = ["name", "size", "date", "type"]
+                current_idx = modes.index(self.left_sort_mode) if self.left_sort_mode in modes else 0
+                self.left_sort_mode = modes[(current_idx + 1) % len(modes)]
+                self.config.plugins.pilotfs.left_sort_mode.value = self.left_sort_mode
+                self.config.plugins.pilotfs.left_sort_mode.save()
+            else:
+                modes = ["name", "size", "date", "type"]
+                current_idx = modes.index(self.right_sort_mode) if self.right_sort_mode in modes else 0
+                self.right_sort_mode = modes[(current_idx + 1) % len(modes)]
+                self.config.plugins.pilotfs.right_sort_mode.value = self.right_sort_mode
+                self.config.plugins.pilotfs.right_sort_mode.save()
+            
+            self.apply_sorting()
+            self.update_ui()
+            self.dialogs.show_message(f"Sort: {self.left_sort_mode if self.active_pane == self['left_pane'] else self.right_sort_mode.upper()}", 
+                                     type="info", timeout=1)
+        except Exception as e:
+            logger.error(f"Error in next sort: {e}")
     
     def prev_sort(self):
         """Cycle to previous sort mode"""
-        if self.active_pane == self["left_pane"]:
-            modes = ["name", "size", "date", "type"]
-            current_idx = modes.index(self.left_sort_mode)
-            self.left_sort_mode = modes[(current_idx - 1) % len(modes)]
-            self.config.plugins.pilotfs.left_sort_mode.value = self.left_sort_mode
-            self.config.plugins.pilotfs.left_sort_mode.save()
-        else:
-            modes = ["name", "size", "date", "type"]
-            current_idx = modes.index(self.right_sort_mode)
-            self.right_sort_mode = modes[(current_idx - 1) % len(modes)]
-            self.config.plugins.pilotfs.right_sort_mode.value = self.right_sort_mode
-            self.config.plugins.pilotfs.right_sort_mode.save()
-        
-        self.apply_sorting()
-        self.update_ui()
-        self.dialogs.show_message(f"Sort: {self.left_sort_mode if self.active_pane == self['left_pane'] else self.right_sort_mode.upper()}", 
-                                 type="info", timeout=1)
+        try:
+            if self.active_pane == self["left_pane"]:
+                modes = ["name", "size", "date", "type"]
+                current_idx = modes.index(self.left_sort_mode) if self.left_sort_mode in modes else 0
+                self.left_sort_mode = modes[(current_idx - 1) % len(modes)]
+                self.config.plugins.pilotfs.left_sort_mode.value = self.left_sort_mode
+                self.config.plugins.pilotfs.left_sort_mode.save()
+            else:
+                modes = ["name", "size", "date", "type"]
+                current_idx = modes.index(self.right_sort_mode) if self.right_sort_mode in modes else 0
+                self.right_sort_mode = modes[(current_idx - 1) % len(modes)]
+                self.config.plugins.pilotfs.right_sort_mode.value = self.right_sort_mode
+                self.config.plugins.pilotfs.right_sort_mode.save()
+            
+            self.apply_sorting()
+            self.update_ui()
+            self.dialogs.show_message(f"Sort: {self.left_sort_mode if self.active_pane == self['left_pane'] else self.right_sort_mode.upper()}", 
+                                     type="info", timeout=1)
+        except Exception as e:
+            logger.error(f"Error in prev sort: {e}")
     
     def apply_sorting(self):
         """Apply current sort mode to active pane"""
@@ -926,74 +1071,74 @@ class PilotFSMain(Screen):
         if missing:
             logger.warning(f"Missing tools: {', '.join(missing)}")
     
-    
-    
     def movie_player_callback(self, *args):
         """Callback when movie player closes - return to plugin"""
         logger.info("Movie player closed, returning to plugin")
+        self.preview_in_progress = False
         # Refresh the current view
         self.update_ui()
-
     
     def play_media_file(self, path):
         """Play media file using Enigma2 service player"""
         try:
-            from enigma import eServiceReference, iPlayableService
+            from enigma import eServiceReference
             from Screens.InfoBar import MoviePlayer
             
-            logger.info("Playing: %s" % path)
+            logger.info(f"Playing: {path}")
             
             # Create service reference (4097 = gstreamer)
             ref = eServiceReference(4097, 0, path)
             ref.setName(os.path.basename(path))
             
-            # Try to use MoviePlayer if available
-            try:
-                self.session.open(MoviePlayer, ref)
-            except:
-                # Fallback: use openWithCallback to return to plugin
-                from Screens.InfoBar import InfoBar
-                InfoBar.instance.servicelist.setCurrent(ref)
-                self.session.nav.playService(ref)
-                
+            # Open MoviePlayer with callback
+            self.session.openWithCallback(
+                self.movie_player_callback,
+                MoviePlayer,
+                ref
+            )
+            
         except ImportError:
             # Final fallback - external player
             logger.warning("Enigma2 player not available, using external")
             self.play_with_external_player(path)
         except Exception as e:
-            logger.error("Playback error: %s" % str(e))
+            logger.error(f"Playback error: {e}")
             self.dialogs.show_message(
-                "Cannot play media file:\n%s\n\nError: %s" % (os.path.basename(path), str(e)),
+                f"Cannot play media file:\n{os.path.basename(path)}\n\nError: {e}",
                 type="error"
             )
     
     def play_with_external_player(self, path):
         """Play with external player as fallback"""
         import subprocess
+        import threading
         
-        # Try common media players
-        players = [
-            ['gst-launch-1.0', 'playbin', 'uri=file://%s' % path],
-            ['ffplay', '-autoexit', path],
-            ['mplayer', path]
-        ]
+        def play_thread():
+            # Try common media players
+            players = [
+                ['gst-launch-1.0', 'playbin', 'uri=file://' + path],
+                ['ffplay', '-autoexit', '-nodisp', path],
+                ['mplayer', '-quiet', path]
+            ]
+            
+            for player_cmd in players:
+                try:
+                    subprocess.Popen(player_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    self.dialogs.show_message(
+                        f"Playing with external player:\n{os.path.basename(path)}",
+                        type="info",
+                        timeout=3
+                    )
+                    return
+                except FileNotFoundError:
+                    continue
+            
+            self.dialogs.show_message(
+                "No media player available!\n\nInstall: opkg install gstreamer1.0",
+                type="error"
+            )
         
-        for player_cmd in players:
-            try:
-                subprocess.Popen(player_cmd)
-                self.dialogs.show_message(
-                    "Playing with external player:\n%s" % os.path.basename(path),
-                    type="info",
-                    timeout=3
-                )
-                return
-            except FileNotFoundError:
-                continue
-        
-        self.dialogs.show_message(
-            "No media player available!\n\nInstall: opkg install gstreamer1.0",
-            type="error"
-        )
+        threading.Thread(target=play_thread, daemon=True).start()
     
     def close_plugin(self):
         """Clean shutdown"""
@@ -1001,14 +1146,49 @@ class PilotFSMain(Screen):
             self.dialogs.show_message("Operation in progress!\n\nPlease wait...", type="warning")
             return
         
-        # Save paths if configured
-        if self.config.plugins.pilotfs.save_left_on_exit.value == "yes":
-            self.config.plugins.pilotfs.left_path.value = self["left_pane"].getCurrentDirectory()
-            self.config.plugins.pilotfs.left_path.save()
+        try:
+            # Save paths if configured
+            if self.config.plugins.pilotfs.save_left_on_exit.value == "yes":
+                self.config.plugins.pilotfs.left_path.value = self["left_pane"].getCurrentDirectory()
+                self.config.plugins.pilotfs.left_path.save()
+            
+            if self.config.plugins.pilotfs.save_right_on_exit.value == "yes":
+                self.config.plugins.pilotfs.right_path.value = self["right_pane"].getCurrentDirectory()
+                self.config.plugins.pilotfs.right_path.save()
+            
+            logger.info("PilotFS shutdown complete")
+            self.close()
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
+            self.close()
+    
+    # Helper method for delete multiple
+    def _execute_delete_multiple(self, confirmed, files):
+        """Execute deletion of multiple items"""
+        if not confirmed:
+            return
         
-        if self.config.plugins.pilotfs.save_right_on_exit.value == "yes":
-            self.config.plugins.pilotfs.right_path.value = self["right_pane"].getCurrentDirectory()
-            self.config.plugins.pilotfs.right_path.save()
-        
-        logger.info("PilotFS shutdown complete")
-        self.close()
+        try:
+            success = 0
+            errors = []
+            
+            for item_path in files:
+                try:
+                    self.file_ops.delete(item_path)
+                    success += 1
+                except Exception as e:
+                    errors.append(f"{os.path.basename(item_path)}: {str(e)[:30]}")
+            
+            msg = f"Deleted: {success} items\n"
+            if errors:
+                msg += f"\nFailed: {len(errors)}\n"
+                msg += "\n".join(errors[:3])
+                if len(errors) > 3:
+                    msg += f"\n... and {len(errors) - 3} more"
+            
+            self.active_pane.refresh()
+            self.update_ui()
+            self.dialogs.show_message(msg, type="info")
+        except Exception as e:
+            logger.error(f"Error deleting multiple items: {e}")
+            self.dialogs.show_message(f"Delete multiple failed: {e}", type="error")
