@@ -350,9 +350,9 @@ class PilotFSMain(Screen):
     def update_help_text(self):
         """Update help text"""
         if self.config.plugins.pilotfs.enable_smart_context.value:
-            help_text = "OK:Nav(Hold:Menu) 0:Ctx 1-9:BMark CH±:Sort MENU:Tools AUDIO:Storage"
+            help_text = "OK:Play/Open 0:Ctx 1-9:BMark CH±:Sort MENU:Tools"
         else:
-            help_text = "OK:Open 0:Info 1-9:BMark CH±:Sort MENU:Tools AUDIO:Storage"
+            help_text = "OK:Play/Open 0:Ctx 1-9:BMark CH±:Sort MENU:Tools"
         self["help_text"].setText(help_text)
     
     # OK Button Long Press Detection

@@ -1,5 +1,11 @@
 # Paths
-TRASH_PATH = "/media/hdd/.pilotfs_trash"
+# Dynamic trash path - uses /media/hdd if available, else /tmp
+import os as _os
+if _os.path.isdir("/media/hdd"):
+    TRASH_PATH = "/media/hdd/.pilotfs_trash"
+else:
+    TRASH_PATH = "/tmp/.pilotfs_trash"
+del _os  # Clean up namespace
 BOOKMARKS_FILE = "/etc/enigma2/pilotfs_bookmarks.json"
 HISTORY_FILE = "/tmp/pilotfs_history.json"
 CACHE_FILE = "/tmp/pilotfs_cache.json"
