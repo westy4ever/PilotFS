@@ -19,17 +19,63 @@ class PilotFSSetup(ConfigListScreen, Screen):
         w, h = getDesktop(0).size().width(), getDesktop(0).size().height()
         
         # Setup skin
+                # Get screen dimensions for responsive sizing
+        desktop_w, desktop_h = getDesktop(0).size().width(), getDesktop(0).size().height()
+        
+        # Make settings panel 85% of screen size for better visibility
+        panel_w = int(desktop_w * 0.85)
+        panel_h = int(desktop_h * 0.85)
+        
+        # Calculate positions
+        config_h = panel_h - 180
+        button_y = panel_h - 70
+        
         self.skin = f"""
-        <screen name="PilotFSSetup" position="center,center" size="800,600" title="PilotFS Configuration">
-            <widget name="config" position="20,50" size="760,480" scrollbarMode="showOnDemand" />
-            <ePixmap pixmap="buttons/red.png" position="20,550" size="140,40" alphatest="on" />
-            <ePixmap pixmap="buttons/green.png" position="180,550" size="140,40" alphatest="on" />
-            <ePixmap pixmap="buttons/yellow.png" position="340,550" size="140,40" alphatest="on" />
-            <ePixmap pixmap="buttons/blue.png" position="500,550" size="140,40" alphatest="on" />
-            <widget name="key_red" position="20,550" size="140,40" zPosition="1" font="Regular;20" halign="center" valign="center" backgroundColor="#9f1313" transparent="1" />
-            <widget name="key_green" position="180,550" size="140,40" zPosition="1" font="Regular;20" halign="center" valign="center" backgroundColor="#1f771f" transparent="1" />
-            <widget name="key_yellow" position="340,550" size="140,40" zPosition="1" font="Regular;20" halign="center" valign="center" backgroundColor="#a08500" transparent="1" />
-            <widget name="key_blue" position="500,550" size="140,40" zPosition="1" font="Regular;20" halign="center" valign="center" backgroundColor="#18188b" transparent="1" />
+        <screen name="PilotFSSetup" position="center,center" size="{panel_w},{panel_h}" title="⚙️ PilotFS Configuration" backgroundColor="#0d1117">
+            <!-- Header -->
+            <eLabel position="0,0" size="{panel_w},70" backgroundColor="#161b22" />
+            <eLabel position="0,68" size="{panel_w},2" backgroundColor="#1976d2" />
+            <eLabel text="⚙️ PILOTFS CONFIGURATION" position="20,15" size="{panel_w-40},40" 
+                    font="Regular;32" halign="center" valign="center" transparent="1" 
+                    foregroundColor="#58a6ff" shadowColor="#000000" shadowOffset="-2,-2" />
+            
+            <!-- Config List with larger spacing -->
+            <widget name="config" position="30,85" size="{panel_w-60},{config_h}" 
+                    scrollbarMode="showOnDemand" 
+                    itemHeight="55" 
+                    backgroundColor="#0d1117" 
+                    foregroundColor="#c9d1d9"
+                    selectionPixmap=""
+                    selectionForeground="#ffffff"
+                    selectionBackground="#1976d2" />
+            
+            <!-- Button Bar -->
+            <eLabel position="0,{button_y-10}" size="{panel_w},2" backgroundColor="#30363d" />
+            <eLabel position="0,{button_y-8}" size="{panel_w},80" backgroundColor="#010409" />
+            
+            <!-- Color-coded Button Backgrounds -->
+            <eLabel position="20,{button_y}" size="180,55" backgroundColor="#7d1818" />
+            <eLabel position="220,{button_y}" size="180,55" backgroundColor="#1a6b34" />
+            <eLabel position="420,{button_y}" size="180,55" backgroundColor="#9e6a03" />
+            <eLabel position="620,{button_y}" size="180,55" backgroundColor="#0969da" />
+            
+            <!-- Button Labels with Icons -->
+            <widget name="key_red" position="25,{button_y+5}" size="170,45" zPosition="1" 
+                    font="Regular;22" halign="center" valign="center" 
+                    transparent="1" foregroundColor="#ffffff" 
+                    shadowColor="#000000" shadowOffset="-1,-1" />
+            <widget name="key_green" position="225,{button_y+5}" size="170,45" zPosition="1" 
+                    font="Regular;22" halign="center" valign="center" 
+                    transparent="1" foregroundColor="#ffffff" 
+                    shadowColor="#000000" shadowOffset="-1,-1" />
+            <widget name="key_yellow" position="425,{button_y+5}" size="170,45" zPosition="1" 
+                    font="Regular;22" halign="center" valign="center" 
+                    transparent="1" foregroundColor="#ffffff" 
+                    shadowColor="#000000" shadowOffset="-1,-1" />
+            <widget name="key_blue" position="625,{button_y+5}" size="170,45" zPosition="1" 
+                    font="Regular;22" halign="center" valign="center" 
+                    transparent="1" foregroundColor="#ffffff" 
+                    shadowColor="#000000" shadowOffset="-1,-1" />
         </screen>"""
         
         # Initialize labels
@@ -63,8 +109,7 @@ class PilotFSSetup(ConfigListScreen, Screen):
         self.list = []
         
         # === GENERAL SETTINGS ===
-        self.list.append(getConfigListEntry("=== General Settings ===", 
-                     config.plugins.pilotfs.left_path))  # Dummy entry for header
+        self.list.append(getConfigListEntry("    ══════ General Settings ══════", config.plugins.pilotfs.left_path))  # Dummy entry for header
         
         self.list.append(getConfigListEntry("Default Left Path:", 
                      config.plugins.pilotfs.left_path))
@@ -80,8 +125,7 @@ class PilotFSSetup(ConfigListScreen, Screen):
                      config.plugins.pilotfs.right_sort_mode))
         
         # === CONTEXT MENU SETTINGS ===
-        self.list.append(getConfigListEntry("=== Context Menu Settings ===", 
-                     config.plugins.pilotfs.left_path))  # Dummy entry
+        self.list.append(getConfigListEntry("    ══════ Context Menu Settings ══════", config.plugins.pilotfs.left_path))  # Dummy entry
         
         self.list.append(getConfigListEntry("Enable Smart Context Menus:", 
                      config.plugins.pilotfs.enable_smart_context))
@@ -91,8 +135,7 @@ class PilotFSSetup(ConfigListScreen, Screen):
                      config.plugins.pilotfs.group_tools_menu))
         
         # === FILE OPERATIONS ===
-        self.list.append(getConfigListEntry("=== File Operations ===", 
-                     config.plugins.pilotfs.left_path))  # Dummy entry
+        self.list.append(getConfigListEntry("    ══════ File Operations ══════", config.plugins.pilotfs.left_path))  # Dummy entry
         
         self.list.append(getConfigListEntry("Enable Trash:", 
                      config.plugins.pilotfs.trash_enabled))
@@ -102,8 +145,7 @@ class PilotFSSetup(ConfigListScreen, Screen):
                      config.plugins.pilotfs.preview_size))
         
         # === EXIT BEHAVIOR ===
-        self.list.append(getConfigListEntry("=== Exit Behavior ===", 
-                     config.plugins.pilotfs.left_path))  # Dummy entry
+        self.list.append(getConfigListEntry("    ══════ Exit Behavior ══════", config.plugins.pilotfs.left_path))  # Dummy entry
         
         self.list.append(getConfigListEntry("Save Left Path on Exit:", 
                      config.plugins.pilotfs.save_left_on_exit))
@@ -111,8 +153,7 @@ class PilotFSSetup(ConfigListScreen, Screen):
                      config.plugins.pilotfs.save_right_on_exit))
         
         # === MEDIA PLAYER ===
-        self.list.append(getConfigListEntry("=== Media Player ===", 
-                     config.plugins.pilotfs.left_path))  # Dummy entry
+        self.list.append(getConfigListEntry("    ══════ Media Player ══════", config.plugins.pilotfs.left_path))  # Dummy entry
         
         self.list.append(getConfigListEntry("Use Internal Player:", 
                      config.plugins.pilotfs.use_internal_player))
@@ -120,8 +161,7 @@ class PilotFSSetup(ConfigListScreen, Screen):
                      config.plugins.pilotfs.fallback_to_external))
         
         # === REMOTE ACCESS ===
-        self.list.append(getConfigListEntry("=== Remote Access ===", 
-                     config.plugins.pilotfs.left_path))  # Dummy entry
+        self.list.append(getConfigListEntry("    ══════ Remote Access ══════", config.plugins.pilotfs.left_path))  # Dummy entry
         
         self.list.append(getConfigListEntry("Remote IP for Mount:", 
                      config.plugins.pilotfs.remote_ip))
@@ -259,7 +299,12 @@ class PilotFSSetup(ConfigListScreen, Screen):
     
     def update_help_text(self):
         """Update help text based on selected item"""
-        current = self.getCurrent()
-        if current:
-            # Could add context-sensitive help here
+        try:
+            current = self["config"].getCurrent()
+            if current:
+                # Could add context-sensitive help here
+                pass
+        except Exception:
+            pass
+        except Exception:
             pass

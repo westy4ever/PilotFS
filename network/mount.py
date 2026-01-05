@@ -1,9 +1,12 @@
 import subprocess
 import os
 import time
+import tempfile
+import shlex
 from ..constants import DEFAULT_CIFS_VERSION, DEFAULT_TIMEOUT
 from ..exceptions import NetworkError, RemoteConnectionError
 from ..utils.validators import validate_ip, validate_hostname, sanitize_string
+import re
 
 class MountManager:
     def __init__(self, config):
@@ -13,13 +16,19 @@ class MountManager:
     
     def mount_cifs(self, server, share, mount_point, username="", password="", domain="", options=None):
         """Mount CIFS/SMB share"""
+        creds_file = None
         try:
             # Validate inputs
             if not validate_ip(server) and not validate_hostname(server):
                 return False, f"Invalid server address: {server}"
             
-            sanitize_string(share)
-            sanitize_string(mount_point)
+            # SECURITY FIX: Validate share name
+            if not re.match(r'^[a-zA-Z0-9_\-.$]+$', share):
+                return False, f"Invalid share name: {share}"
+            
+            # Validate mount point
+            if not os.path.isabs(mount_point):
+                return False, "Mount point must be absolute path"
             
             # Create mount point if it doesn't exist
             if not os.path.exists(mount_point):
@@ -31,15 +40,25 @@ class MountManager:
             # Build mount options
             mount_options = []
             
+            # SECURITY FIX: Use credentials file instead of command line
             if username:
-                mount_options.append(f"user={username}")
-                if password:
-                    mount_options.append(f"password={password}")
+                creds_fd, creds_file = tempfile.mkstemp(prefix='pilotfs_', suffix='.creds', dir='/tmp')
+                try:
+                    with os.fdopen(creds_fd, 'w') as f:
+                        f.write(f"username={username}\n")
+                        if password:
+                            f.write(f"password={password}\n")
+                        if domain:
+                            f.write(f"domain={domain}\n")
+                    # Secure permissions (owner read/write only)
+                    os.chmod(creds_file, 0o600)
+                    mount_options.append(f"credentials={creds_file}")
+                except Exception:
+                    if creds_file and os.path.exists(creds_file):
+                        os.unlink(creds_file)
+                    raise
             else:
                 mount_options.append("guest")
-            
-            if domain:
-                mount_options.append(f"domain={domain}")
             
             mount_options.append(f"vers={DEFAULT_CIFS_VERSION}")
             mount_options.append("rw")
@@ -52,7 +71,7 @@ class MountManager:
                 elif isinstance(options, str):
                     mount_options.append(options)
             
-            # Build mount command
+            # Build mount command with proper quoting
             mount_cmd = [
                 "mount", "-t", "cifs",
                 f"//{server}/{share}",
@@ -67,6 +86,11 @@ class MountManager:
                 text=True
             )
             
+            # Clean up credentials file
+            if creds_file and os.path.exists(creds_file):
+                os.unlink(creds_file)
+                creds_file = None
+            
             if result.returncode == 0:
                 self.mount_points[mount_point] = {
                     'type': 'cifs',
@@ -80,8 +104,25 @@ class MountManager:
                 
                 # Try different CIFS versions
                 for version in ["2.0", "1.0"]:
-                    mount_options[-1] = f"vers={version}"  # Replace last option
-                    mount_cmd[-1] = ",".join(mount_options)
+                    # Recreate credentials file if needed
+                    if username:
+                        creds_fd, creds_file = tempfile.mkstemp(prefix='pilotfs_', suffix='.creds', dir='/tmp')
+                        with os.fdopen(creds_fd, 'w') as f:
+                            f.write(f"username={username}\n")
+                            if password:
+                                f.write(f"password={password}\n")
+                            if domain:
+                                f.write(f"domain={domain}\n")
+                        os.chmod(creds_file, 0o600)
+                    
+                    # Update version in options
+                    new_options = [opt if not opt.startswith('vers=') else f'vers={version}' for opt in mount_options]
+                    mount_cmd = [
+                        "mount", "-t", "cifs",
+                        f"//{server}/{share}",
+                        mount_point,
+                        "-o", ",".join(new_options)
+                    ]
                     
                     result = subprocess.run(
                         mount_cmd,
@@ -90,20 +131,29 @@ class MountManager:
                         text=True
                     )
                     
+                    # Clean up credentials file
+                    if creds_file and os.path.exists(creds_file):
+                        os.unlink(creds_file)
+                        creds_file = None
+                    
                     if result.returncode == 0:
                         self.mount_points[mount_point] = {
                             'type': 'cifs',
                             'server': server,
                             'share': share,
-                            'options': mount_options
+                            'options': new_options
                         }
                         return True, f"Mounted with vers={version}"
                 
                 return False, f"Mount failed: {error[:200]}"
                 
         except subprocess.TimeoutExpired:
+            if creds_file and os.path.exists(creds_file):
+                os.unlink(creds_file)
             return False, "Mount operation timed out"
         except Exception as e:
+            if creds_file and os.path.exists(creds_file):
+                os.unlink(creds_file)
             return False, f"Mount error: {e}"
     
     def umount(self, mount_point, force=False, lazy=False):
@@ -209,7 +259,12 @@ class MountManager:
         """Scan for available shares on server"""
         try:
             if not validate_ip(server) and not validate_hostname(server):
-                return False, f"Invalid server address: {server}"
+                return False, "Invalid server address: %s" % server
+            
+            # First test if server is reachable
+            ping_success, ping_msg = self.test_ping(server)
+            if not ping_success:
+                return False, "Server unreachable: %s. Check IP address and network." % server
             
             # Check if smbclient is available
             smb_check = subprocess.run(
@@ -218,54 +273,55 @@ class MountManager:
                 timeout=5
             )
             if smb_check.returncode != 0:
-                return False, "smbclient not installed. Install with: opkg install samba-client"
+                return False, "smbclient not installed. Install: opkg install samba-client"
             
-            # Scan for shares
+            # Try anonymous listing first
             result = subprocess.run(
-                ["smbclient", "-L", server, "-N"],
+                ["smbclient", "-L", server, "-N", "-g"],
                 capture_output=True,
                 timeout=15,
                 text=True
             )
             
+            if result.returncode != 0:
+                # Try with guest
+                result = subprocess.run(
+                    ["smbclient", "-L", server, "-U", "guest%", "-g"],
+                    capture_output=True,
+                    timeout=15,
+                    text=True
+                )
+            
             if result.returncode == 0:
                 shares = []
-                lines = result.stdout.split('\n')
+                lines = result.stdout.split("\n")
                 
                 for line in lines:
-                    line = line.strip()
-                    if line and "Disk" in line:
-                        # Parse share line
-                        parts = line.split()
-                        if parts:
-                            share_name = parts[0]
-                            if share_name and not share_name.startswith('--'):
+                    if '|Disk|' in line:
+                        parts = line.split('|')
+                        if len(parts) >= 2:
+                            share_name = parts[1]
+                            if share_name and not share_name.endswith('$'):
                                 shares.append({
                                     'name': share_name,
                                     'type': 'Disk',
-                                    'description': ' '.join(parts[1:]) if len(parts) > 1 else ""
-                                })
-                    elif line and "Printer" in line:
-                        parts = line.split()
-                        if parts:
-                            share_name = parts[0]
-                            if share_name and not share_name.startswith('--'):
-                                shares.append({
-                                    'name': share_name,
-                                    'type': 'Printer',
-                                    'description': ' '.join(parts[1:]) if len(parts) > 1 else ""
+                                    'description': parts[2] if len(parts) > 2 else ''
                                 })
                 
-                return True, shares
+                if shares:
+                    return True, shares
+                else:
+                    return False, "No shares found on %s. Server may require authentication." % server
             else:
-                error = result.stderr[:200] if result.stderr else result.stdout[:200]
-                return False, f"Scan failed: {error}"
+                error = result.stderr[:200] if result.stderr else "Connection refused"
+                return False, "Scan failed: %s. Try: Check IP, firewall, SMB enabled on server." % error
                 
         except subprocess.TimeoutExpired:
-            return False, "Scan timed out"
+            return False, "Scan timed out. Server may be slow or unreachable."
         except Exception as e:
-            return False, f"Scan error: {e}"
+            return False, "Scan error: %s" % str(e)
     
+
     def test_ping(self, host):
         """Ping host to test connectivity"""
         try:
@@ -293,23 +349,14 @@ class MountManager:
         """Get list of available mount points"""
         mount_points = []
         
-        # Common mount locations
         common_locations = [
-            "/media/net",
-            "/media/usb",
-            "/media/usb1",
-            "/media/usb2",
-            "/media/hdd",
-            "/media/mmc",
-            "/media/sdcard",
-            "/tmp/mnt"
+            "/media/net", "/media/usb", "/media/usb1", "/media/usb2",
+            "/media/hdd", "/media/mmc", "/media/sdcard", "/tmp/mnt"
         ]
         
         for location in common_locations:
             if os.path.isdir(location):
                 mount_points.append(location)
-                
-                # Check for subdirectories
                 try:
                     for item in os.listdir(location):
                         item_path = os.path.join(location, item)
@@ -318,7 +365,6 @@ class MountManager:
                 except:
                     pass
         
-        # Also check /mnt
         if os.path.isdir("/mnt"):
             mount_points.append("/mnt")
             try:
@@ -329,7 +375,7 @@ class MountManager:
             except:
                 pass
         
-        return list(set(mount_points))  # Remove duplicates
+        return list(set(mount_points))
     
     def cleanup_mounts(self):
         """Cleanup stale mounts"""
@@ -340,16 +386,13 @@ class MountManager:
             
             cleaned = 0
             for mount in mounts:
-                if "//" in mount or ":" in mount:  # Network mount
+                if "//" in mount or ":" in mount:
                     parts = mount.split()
                     if len(parts) >= 3:
                         mount_point = parts[2]
-                        
-                        # Try to unmount if not accessible
                         try:
                             os.listdir(mount_point)
                         except:
-                            # Mount appears broken, try to unmount
                             self.umount(mount_point, force=True, lazy=True)
                             cleaned += 1
             

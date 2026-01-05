@@ -4,6 +4,9 @@ from datetime import datetime
 from ..constants import DEFAULT_FTP_PORT, DEFAULT_TIMEOUT
 from ..exceptions import RemoteConnectionError, NetworkError
 from ..utils.validators import validate_hostname, validate_port
+from ..utils.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 class FTPClient:
     def __init__(self, config):
@@ -41,19 +44,31 @@ class FTPClient:
     
     def disconnect(self):
         """Disconnect from FTP server"""
-        try:
-            if self.connection:
-                self.connection.quit()
-                self.connection = None
+        if not self.connection:
             return True
-        except Exception:
+            
+        try:
+            self.connection.quit()
+            self.connection = None
+            return True
+        except (ftplib.error_perm, ftplib.error_temp) as e:
+            logger.warning(f"Error during quit: {e}")
             # Try to close forcefully
             try:
                 if self.connection:
                     self.connection.close()
-            except:
+                    self.connection = None
+            except Exception as close_error:
+                logger.error(f"Error during force close: {close_error}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected disconnect error: {e}")
+            try:
+                if self.connection:
+                    self.connection.close()
+                    self.connection = None
+            except Exception:
                 pass
-            self.connection = None
             return False
     
     def is_connected(self):
@@ -65,7 +80,7 @@ class FTPClient:
             # Send a NOOP command to check connection
             self.connection.voidcmd("NOOP")
             return True
-        except:
+        except Exception:
             return False
     
     def test_connection(self, host, port=DEFAULT_FTP_PORT, username="anonymous", password=""):
@@ -85,7 +100,43 @@ class FTPClient:
             if not self.is_connected():
                 raise RemoteConnectionError("Not connected to FTP server")
             
-            # Change to directory
+            # Try MLSD first (structured listing)
+            try:
+                entries = []
+                for name, facts in self.connection.mlsd(path):
+                    if name in ['.', '..']:
+                        continue
+                    
+                    is_dir = facts.get('type', '').lower() == 'dir'
+                    size = int(facts.get('size', 0))
+                    
+                    # Parse modify time if available
+                    date = None
+                    if 'modify' in facts:
+                        try:
+                            # Format: YYYYMMDDhhmmss
+                            date_str = facts['modify']
+                            date = datetime.strptime(date_str, "%Y%m%d%H%M%S")
+                        except Exception:
+                            pass
+                    
+                    entries.append({
+                        'name': name,
+                        'path': os.path.join(path, name) if path != '/' else '/' + name,
+                        'is_dir': is_dir,
+                        'is_link': False,
+                        'size': size,
+                        'permissions': facts.get('unix.mode', ''),
+                        'date': date
+                    })
+                
+                return entries
+                
+            except (ftplib.error_perm, AttributeError):
+                # MLSD not supported, fall back to DIR
+                pass
+            
+            # Fallback: Use DIR command
             if path and path != "/":
                 self.connection.cwd(path)
             
@@ -121,7 +172,7 @@ class FTPClient:
                             date = datetime.strptime(date_str, "%b %d %H:%M")
                             # Add current year
                             date = date.replace(year=datetime.now().year)
-                        except:
+                        except Exception:
                             pass
                         
                         entries.append({
@@ -134,8 +185,8 @@ class FTPClient:
                             'date': date,
                             'full_line': line
                         })
-                except Exception:
-                    # Skip lines we can't parse
+                except Exception as parse_error:
+                    logger.warning(f"Failed to parse FTP listing line: {parse_error}")
                     continue
             
             return entries
@@ -254,7 +305,7 @@ class FTPClient:
                 size = self.connection.size(path)
                 if size is not None:
                     return size
-            except:
+            except (ftplib.error_perm, AttributeError):
                 pass
             
             # Fallback: list directory and find file

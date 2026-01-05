@@ -23,21 +23,59 @@ except ImportError:
         return txt
 
 from Plugins.Plugin import PluginDescriptor
-from .ui.main_screen import PilotFSMain
-from .utils.logging_config import setup_logging, get_logger
 
-# Setup logging
-logger = get_logger(__name__)
+# Setup logging early
+try:
+    from Plugins.Extensions.PilotFS.utils.logging_config import setup_logging, get_logger
+    logger = get_logger(__name__)
+except Exception as e:
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+    logger.error("Failed to setup logging: %s" % str(e))
 
 def main(session, **kwargs):
     """Main entry point for the plugin"""
+    import traceback
+    import sys
+    
     try:
         logger.info("Starting PilotFS Platinum v6.1")
+        logger.info("Python path: %s" % str(sys.path[:3]))
+        
+        # Try to import main screen
+        logger.info("Attempting to import PilotFSMain...")
+        try:
+            from Plugins.Extensions.PilotFS.ui.main_screen import PilotFSMain
+            logger.info("Successfully imported PilotFSMain: %s" % str(PilotFSMain))
+        except ImportError as ie:
+            logger.error("Import error: %s" % str(ie))
+            logger.error("Full traceback:\n%s" % traceback.format_exc())
+            raise
+        
+        # Open the main screen
+        logger.info("Opening PilotFSMain screen...")
         session.open(PilotFSMain)
+        logger.info("PilotFS started successfully")
+        
     except Exception as e:
-        logger.error(f"Failed to start PilotFS: {e}")
-        from Screens.MessageBox import MessageBox
-        session.open(MessageBox, f"Failed to start PilotFS:\n{e}", MessageBox.TYPE_ERROR)
+        error_msg = str(e)
+        error_trace = traceback.format_exc()
+        
+        logger.error("Failed to start PilotFS: %s" % error_msg)
+        logger.error("Traceback:\n%s" % error_trace)
+        
+        # Show error to user
+        try:
+            from Screens.MessageBox import MessageBox
+            session.open(
+                MessageBox,
+                "Failed to start PilotFS:\n\n%s\n\nCheck /tmp/pilotfs.log" % error_msg,
+                MessageBox.TYPE_ERROR,
+                timeout=10
+            )
+        except Exception as msg_error:
+            logger.error("Could not show error message: %s" % str(msg_error))
 
 def menu(menuid, **kwargs):
     """Plugin menu integration"""

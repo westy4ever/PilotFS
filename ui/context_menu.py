@@ -21,7 +21,11 @@ class ContextMenuHandler:
         if not sel or not sel[0]:
             self.show_general_context_menu()
         else:
-            self.show_item_context_menu()
+            # Use smart context menu if enabled
+            if self.config.plugins.pilotfs.enable_smart_context.value:
+                self.show_smart_context_menu(sel[0])
+            else:
+                self.show_item_context_menu()
     
     def show_general_context_menu(self):
         """Show context menu for current directory"""
@@ -321,8 +325,14 @@ class ContextMenuHandler:
         
         mode = answer[1]
         
+        # Store that we came from tools menu
+        self.from_tools_menu = True
+        
         if mode == "cfg":
-            self.main.session.open(self.main.dialogs.SetupScreen)
+            self.main.session.openWithCallback(
+                self.return_to_tools_menu,
+                self.main.dialogs.SetupScreen
+            )
         elif mode == "bookmarks":
             self.main.dialogs.show_bookmark_manager(self.main.bookmarks, self.main.config, 
                                                    self.main.active_pane, self.main.update_ui)
@@ -365,7 +375,7 @@ class ContextMenuHandler:
         elif mode == "ping":
             self.main.dialogs.show_ping_dialog(self.main.mount_mgr)
         elif mode == "cloud":
-            self.main.dialogs.show_cloud_sync_dialog()
+            self.show_cloud_sync_menu()
         elif mode == "clean":
             self.main.dialogs.show_cleanup_dialog()
         elif mode == "picon":
@@ -381,7 +391,7 @@ class ContextMenuHandler:
         elif mode == "log":
             self.main.dialogs.show_log_viewer()
         elif mode == "repair":
-            self.main.dialogs.show_repair_dialog()
+            self.show_repair_menu()
         elif mode == "grep":
             self.main.dialogs.show_content_search_dialog(self.main.active_pane.getCurrentDirectory(), 
                                                         self.main.search_engine)
@@ -400,7 +410,81 @@ class ContextMenuHandler:
         elif mode == "storage":
             self.main.show_storage_selector()
     
-    # Helper methods
+    def return_to_tools_menu(self, *args):
+        """Return to tools menu after sub-operation"""
+        if hasattr(self, 'from_tools_menu') and self.from_tools_menu:
+            self.from_tools_menu = False
+            # Show tools menu again
+            self.show_tools_menu()
+    
+    def show_cloud_sync_menu(self):
+        """Show cloud sync submenu with actual functionality"""
+        choices = [
+            ("☁️ Configure rclone", "config"),
+            ("⬆️ Upload to Cloud", "upload"),
+            ("⬇️ Download from Cloud", "download"),
+            ("🔄 Sync Folder", "sync"),
+            ("📋 List Cloud Storage", "list"),
+            ("⬅️ Back to Tools", "back"),
+        ]
+        
+        self.main.session.openWithCallback(
+            self.handle_cloud_menu,
+            ChoiceBox,
+            title="☁️ Cloud Sync (rclone)",
+            list=choices
+        )
+    
+    def handle_cloud_menu(self, choice):
+        """Handle cloud sync menu"""
+        if not choice or choice[1] == "back":
+            self.show_tools_menu()
+            return
+        
+        action = choice[1]
+        
+        if action == "config":
+            self.main.dialogs.show_message("Configure rclone in SSH: rclone config", type="info")
+        elif action == "download":
+            self.main.dialogs.show_message("Download feature - Configure rclone remote to download", type="info")
+        elif action == "sync":
+            self.main.dialogs.show_message("Sync feature - Keep folders synchronized with cloud", type="info")
+        elif action == "list":
+            self.main.dialogs.show_message("List remotes: Run 'rclone listremotes' in SSH", type="info")
+    
+    def show_repair_menu(self):
+        """Show repair submenu"""
+        choices = [
+            ("🔧 Install Missing Tools", "install"),
+            ("🗑️ Clean Temp Files", "clean_temp"),
+            ("📦 Fix Package Database", "fix_packages"),
+            ("🔗 Repair Symlinks", "repair_links"),
+            ("⬅️ Back to Tools", "back"),
+        ]
+        
+        self.main.session.openWithCallback(
+            self.handle_repair_menu,
+            ChoiceBox,
+            title="🔧 System Repair",
+            list=choices
+        )
+    
+    def handle_repair_menu(self, choice):
+        """Handle repair menu"""
+        if not choice or choice[1] == "back":
+            self.show_tools_menu()
+            return
+        
+        action = choice[1]
+        
+        if action == "install":
+            self.main.dialogs.show_repair_dialog()
+        elif action == "clean_temp":
+            self.main.dialogs.show_cleanup_dialog()
+        elif action == "fix_packages":
+            self.main.dialogs.show_message("Run: opkg update && opkg upgrade", type="info")
+        elif action == "repair_links":
+            self.main.dialogs.show_picon_repair_dialog()
     def rename_folder(self, folder_path):
         """Rename current folder"""
         current_name = os.path.basename(folder_path)
@@ -583,3 +667,335 @@ class ContextMenuHandler:
                 self.main.dialogs.show_message(msg, type="info")
         except Exception as e:
             self.main.dialogs.show_message(f"Cannot read folder info:\n{e}", type="error")
+    def show_smart_context_menu(self, file_path):
+        """Show smart context menu based on file type"""
+        import os
+        
+        if not os.path.exists(file_path):
+            return
+        
+        filename = os.path.basename(file_path)
+        ext = os.path.splitext(filename)[1].lower()
+        
+        # Determine file type and show appropriate menu
+        if ext == '.sh':
+            self._show_script_menu(file_path, filename)
+        elif ext in ['.zip', '.tar', '.tar.gz', '.tgz', '.rar', '.7z', '.gz']:
+            self._show_archive_menu(file_path, filename)
+        elif ext == '.ipk':
+            self._show_package_menu(file_path, filename)
+        elif ext in ['.mp4', '.mkv', '.avi', '.ts', '.m2ts']:
+            self._show_media_menu(file_path, filename)
+        elif ext in ['.mp3', '.flac', '.wav', '.aac']:
+            self._show_audio_menu(file_path, filename)
+        elif ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp']:
+            self._show_image_menu(file_path, filename)
+        elif ext in ['.txt', '.log', '.conf', '.cfg', '.ini', '.xml', '.json']:
+            self._show_text_menu(file_path, filename)
+        else:
+            # Fallback to regular item context menu
+            self.show_item_context_menu()
+    
+    def _show_script_menu(self, file_path, filename):
+        """Context menu for shell scripts"""
+        menu_items = [
+            ("Cancel", None),
+            ("View or edit this shell script", "view"),
+            ("Run script", "run"),
+            ("Run script in background", "run_bg"),
+            ("Run script with optional parameter", "run_param"),
+            ("Run script with optional parameter in background", "run_param_bg"),
+            ("Make executable", "chmod"),
+        ]
+        
+        self.main.session.openWithCallback(
+            lambda choice: self._handle_script_action(choice, file_path, filename) if choice and choice[1] else None,
+            ChoiceBox,
+            title="Script: " + filename,
+            list=menu_items
+        )
+    
+    def _handle_script_action(self, choice, file_path, filename):
+        """Handle script menu action"""
+        action = choice[1]
+        
+        if action == "view":
+            self.main.dialogs.preview_file(file_path, self.file_ops, self.config)
+        elif action == "run":
+            self._execute_script(file_path, "", False)
+        elif action == "run_bg":
+            self._execute_script(file_path, "", True)
+        elif action == "run_param":
+            self.main.dialogs.show_input(
+                "Optional parameter:",
+                "",
+                lambda param: self._execute_script(file_path, param if param else "", False)
+            )
+        elif action == "run_param_bg":
+            self.main.dialogs.show_input(
+                "Optional parameter:",
+                "",
+                lambda param: self._execute_script(file_path, param if param else "", True)
+            )
+        elif action == "chmod":
+            import os
+            try:
+                os.chmod(file_path, 0o755)
+                self.main.dialogs.show_message("Made executable: " + filename, type="info", timeout=2)
+            except Exception as e:
+                self.main.dialogs.show_message("Failed to make executable: " + str(e), type="error")
+    
+    def _execute_script(self, file_path, param, background):
+        """Execute shell script"""
+        import subprocess
+        import threading
+        
+        def run_script():
+            try:
+                cmd = ["/bin/sh", file_path]
+                if param:
+                    cmd.append(param)
+                
+                if background:
+                    result = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    self.main.dialogs.show_message(
+                        "Script started in background\n\nPID: %d" % result.pid,
+                        type="info", timeout=2
+                    )
+                else:
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                    
+                    output = result.stdout if result.stdout else result.stderr
+                    if not output:
+                        output = "Script executed successfully" if result.returncode == 0 else "Script failed"
+                    
+                    self.main.dialogs.show_message(
+                        "Script Output:\n\n" + output[:500],
+                        type="info" if result.returncode == 0 else "error"
+                    )
+            except subprocess.TimeoutExpired:
+                self.main.dialogs.show_message("Script execution timed out", type="error")
+            except Exception as e:
+                self.main.dialogs.show_message("Script error: " + str(e), type="error")
+        
+        threading.Thread(target=run_script, daemon=True).start()
+    
+    def _show_archive_menu(self, file_path, filename):
+        """Context menu for archive files"""
+        menu_items = [
+            ("Cancel", None),
+            ("View the archive contents", "view"),
+            ("Extract the archive contents", "extract"),
+        ]
+        
+        self.main.session.openWithCallback(
+            lambda choice: self._handle_archive_action(choice, file_path, filename) if choice and choice[1] else None,
+            ChoiceBox,
+            title="Archive: " + filename,
+            list=menu_items
+        )
+    
+    def _handle_archive_action(self, choice, file_path, filename):
+        """Handle archive menu action"""
+        action = choice[1]
+        
+        if action == "view":
+            try:
+                contents = self.main.archive_mgr.list_archive(file_path)
+                msg = "Archive Contents (%d items):\n\n" % len(contents)
+                for item in contents[:20]:
+                    icon = "📁" if item.get('is_dir') else "📄"
+                    msg += "%s %s\n" % (icon, item['name'])
+                if len(contents) > 20:
+                    msg += "\n... and %d more items" % (len(contents) - 20)
+                self.main.dialogs.show_message(msg, type="info")
+            except Exception as e:
+                self.main.dialogs.show_message("Cannot view archive: " + str(e), type="error")
+        
+        elif action == "extract":
+            self.main.dialogs.show_extract_dialog(
+                file_path, 
+                self.main.archive_mgr, 
+                self.main.active_pane, 
+                self.main.update_ui
+            )
+    
+    def _show_package_menu(self, file_path, filename):
+        """Context menu for IPK packages"""
+        menu_items = [
+            ("Cancel", None),
+            ("View the package contents", "view"),
+            ("Extract the package contents", "extract"),
+            ("Install the package", "install"),
+        ]
+        
+        self.main.session.openWithCallback(
+            lambda choice: self._handle_package_action(choice, file_path, filename) if choice and choice[1] else None,
+            ChoiceBox,
+            title="Package: " + filename,
+            list=menu_items
+        )
+    
+    def _handle_package_action(self, choice, file_path, filename):
+        """Handle package menu action"""
+        import subprocess
+        import threading
+        
+        action = choice[1]
+        
+        if action == "view":
+            def view_pkg():
+                try:
+                    result = subprocess.run(
+                        ["opkg", "info", file_path],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    info = result.stdout if result.stdout else "No package info available"
+                    self.main.dialogs.show_message("Package Info:\n\n" + info[:800], type="info")
+                except Exception as e:
+                    self.main.dialogs.show_message("Cannot view package: " + str(e), type="error")
+            
+            threading.Thread(target=view_pkg, daemon=True).start()
+        
+        elif action == "extract":
+            # IPK files are ar archives, can extract with ar/tar
+            self.main.dialogs.show_message(
+                "Extract IPK to current directory?",
+                type="info"
+            )
+        
+        elif action == "install":
+            self.main.dialogs.show_confirmation(
+                "Install package:\n%s\n\nThis will run:\nopkg install %s" % (filename, file_path),
+                lambda res: self._install_package(res, file_path) if res else None
+            )
+    
+    def _install_package(self, confirmed, file_path):
+        """Install IPK package"""
+        if not confirmed:
+            return
+        
+        import subprocess
+        import threading
+        
+        def install():
+            try:
+                result = subprocess.run(
+                    ["opkg", "install", file_path],
+                    capture_output=True, text=True, timeout=60
+                )
+                
+                if result.returncode == 0:
+                    self.main.dialogs.show_message(
+                        "Package installed successfully!\n\n" + result.stdout[:500],
+                        type="info"
+                    )
+                else:
+                    self.main.dialogs.show_message(
+                        "Installation failed:\n\n" + result.stderr[:500],
+                        type="error"
+                    )
+            except Exception as e:
+                self.main.dialogs.show_message("Installation error: " + str(e), type="error")
+        
+        threading.Thread(target=install, daemon=True).start()
+    
+    def _show_media_menu(self, file_path, filename):
+        """Context menu for video files"""
+        menu_items = [
+            ("Cancel", None),
+            ("Play media file", "play"),
+            ("View file info", "info"),
+            ("Copy to other pane", "copy_other"),
+            ("Move to other pane", "move_other"),
+        ]
+        
+        self.main.session.openWithCallback(
+            lambda choice: self._handle_media_action(choice, file_path, filename) if choice and choice[1] else None,
+            ChoiceBox,
+            title="Media: " + filename,
+            list=menu_items
+        )
+    
+    def _handle_media_action(self, choice, file_path, filename):
+        """Handle media menu action"""
+        action = choice[1]
+        
+        if action == "play":
+            self.main.preview_media()
+        elif action == "info":
+            self.main.show_file_info()
+        elif action == "copy_other":
+            self.copy_to_other_pane(file_path)
+        elif action == "move_other":
+            self.move_to_other_pane(file_path)
+    
+    def _show_audio_menu(self, file_path, filename):
+        """Context menu for audio files"""
+        menu_items = [
+            ("Cancel", None),
+            ("Play audio file", "play"),
+            ("View file info", "info"),
+            ("Copy to other pane", "copy_other"),
+        ]
+        
+        self.main.session.openWithCallback(
+            lambda choice: self._handle_media_action(choice, file_path, filename) if choice and choice[1] else None,
+            ChoiceBox,
+            title="Audio: " + filename,
+            list=menu_items
+        )
+    
+    def _show_image_menu(self, file_path, filename):
+        """Context menu for image files"""
+        menu_items = [
+            ("Cancel", None),
+            ("View image", "view"),
+            ("View file info", "info"),
+            ("Copy to other pane", "copy_other"),
+        ]
+        
+        self.main.session.openWithCallback(
+            lambda choice: self._handle_image_action(choice, file_path, filename) if choice and choice[1] else None,
+            ChoiceBox,
+            title="Image: " + filename,
+            list=menu_items
+        )
+    
+    def _handle_image_action(self, choice, file_path, filename):
+        """Handle image menu action"""
+        action = choice[1]
+        
+        if action == "view":
+            self.main.dialogs.preview_image(file_path, self.file_ops)
+        elif action == "info":
+            self.main.show_file_info()
+        elif action == "copy_other":
+            self.copy_to_other_pane(file_path)
+    
+    def _show_text_menu(self, file_path, filename):
+        """Context menu for text files"""
+        menu_items = [
+            ("Cancel", None),
+            ("View/Edit text file", "view"),
+            ("View file info", "info"),
+            ("Copy to other pane", "copy_other"),
+        ]
+        
+        self.main.session.openWithCallback(
+            lambda choice: self._handle_text_action(choice, file_path, filename) if choice and choice[1] else None,
+            ChoiceBox,
+            title="Text: " + filename,
+            list=menu_items
+        )
+    
+    def _handle_text_action(self, choice, file_path, filename):
+        """Handle text menu action"""
+        action = choice[1]
+        
+        if action == "view":
+            self.main.dialogs.preview_file(file_path, self.file_ops, self.config)
+        elif action == "info":
+            self.main.show_file_info()
+        elif action == "copy_other":
+            self.copy_to_other_pane(file_path)

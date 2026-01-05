@@ -1,5 +1,6 @@
 from Screens.Screen import Screen
 from Screens.MessageBox import MessageBox
+from Screens.VirtualKeyBoard import VirtualKeyBoard
 from Components.ActionMap import ActionMap
 from Components.FileList import FileList
 from Components.Label import Label
@@ -8,12 +9,17 @@ from enigma import getDesktop, eTimer
 import threading
 import os
 
-from ..core import PilotFSConfig, FileOperations, ArchiveManager, SearchEngine
-from ..network import RemoteConnectionManager, MountManager
+from ..core.config import PilotFSConfig
+from ..core.file_operations import FileOperations
+from ..core.archive import ArchiveManager
+from ..core.search import SearchEngine
+from ..network.remote_manager import RemoteConnectionManager
+from ..network.mount import MountManager
 from ..utils.formatters import get_file_icon, format_size
 from ..utils.logging_config import get_logger
 from .context_menu import ContextMenuHandler
 from .dialogs import Dialogs
+
 
 logger = get_logger(__name__)
 
@@ -24,7 +30,7 @@ class PilotFSMain(Screen):
         # Get screen dimensions
         w, h = getDesktop(0).size().width(), getDesktop(0).size().height()
         pane_width = (w - 60) // 2
-        pane_height = h - 250
+        pane_height = h - 300  # Increased spacing to prevent overlap
         
         # Initialize core components
         self.config = PilotFSConfig()
@@ -33,8 +39,10 @@ class PilotFSMain(Screen):
         self.search_engine = SearchEngine()
         self.remote_mgr = RemoteConnectionManager(self.config)
         self.mount_mgr = MountManager(self.config)
-        self.context_menu = ContextMenuHandler(self)
+        
+        # Initialize UI components
         self.dialogs = Dialogs(self.session)
+        self.context_menu = ContextMenuHandler(self)
         
         # Setup UI
         self.setup_ui(w, h, pane_width, pane_height)
@@ -47,7 +55,8 @@ class PilotFSMain(Screen):
         
         # Start
         self.onLayoutFinish.append(self.startup)
-    
+
+
     def setup_ui(self, w, h, pane_width, pane_height):
         """Setup user interface"""
         button_y = h - 60
@@ -77,9 +86,9 @@ class PilotFSMain(Screen):
             
             <!-- File Lists -->
             <widget name="left_pane" position="25,125" size="{pane_width},{pane_height}" 
-                    itemHeight="45" selectionColor="#FF0000" scrollbarMode="showOnDemand" />
+                    itemHeight="40" selectionColor="#FF0000" scrollbarMode="showOnDemand" />
             <widget name="right_pane" position="{pane_width + 45},125" size="{pane_width},{pane_height}" 
-                    itemHeight="45" selectionColor="#FF0000" scrollbarMode="showOnDemand" />
+                    itemHeight="40" selectionColor="#FF0000" scrollbarMode="showOnDemand" />
             
             <!-- Info Panels -->
             <widget name="progress_bar" position="20,{h-170}" size="{w-40},8" 
@@ -294,21 +303,32 @@ class PilotFSMain(Screen):
         self["path_label"].setText(f"📁 {current_dir}")
     
     def update_info_panel(self):
-        """Update info panel with current file details"""
+        """Update info panel with current file details - OPTIMIZED"""
         sel = self.active_pane.getSelection()
         if sel and sel[0]:
             try:
-                info = self.file_ops.get_file_info(sel[0])
-                if info:
-                    icon = get_file_icon(sel[0])
-                    text = f"{icon} {info['name']} | {info['size_formatted']} | {info['modified'].strftime('%Y-%m-%d %H:%M')}"
-                    self["info_panel"].setText(text)
-                    return
+                path = sel[0]
+                name = os.path.basename(path)
+                icon = get_file_icon(path)
+                
+                # Only get size for files, not directories (too slow)
+                if os.path.isfile(path):
+                    try:
+                        size = os.path.getsize(path)
+                        size_str = format_size(size)
+                    except:
+                        size_str = "?"
+                else:
+                    size_str = "DIR"
+                
+                text = "%s %s | %s" % (icon, name, size_str)
+                self["info_panel"].setText(text)
+                return
             except Exception:
                 pass
         
         self["info_panel"].setText("")
-    
+
     def update_operation_progress(self):
         """Update progress bar during operations"""
         if self.operation_total > 0:
@@ -342,20 +362,37 @@ class PilotFSMain(Screen):
         path = sel[0]
         
         if os.path.isdir(path):
+            # Enter directory
             self.active_pane.changeDir(path)
             self.update_ui()
         else:
-            self.preview_file()
-    
+            # Check if file type should show smart context menu
+            ext = os.path.splitext(path)[1].lower()
+            
+            # File types that trigger smart context menu on OK
+            smart_menu_extensions = [
+                '.sh',                                    # Shell scripts
+                '.zip', '.tar', '.tar.gz', '.tgz', '.rar', '.7z', '.gz',  # Archives
+                '.ipk',                                   # IPK packages
+                '.mp4', '.mkv', '.avi', '.ts', '.m2ts', '.mov',  # Video
+                '.mp3', '.flac', '.wav', '.aac', '.ogg',  # Audio
+            ]
+            
+            if ext in smart_menu_extensions:
+                # Show smart context menu
+                self.context_menu.show_smart_context_menu(path)
+            else:
+                # Default behavior: preview file
+                self.preview_file()
     def up(self):
         """Move up in file list"""
         self.active_pane.up()
-        self.update_ui()
+        self.update_info_panel()  # Fast update
     
     def down(self):
         """Move down in file list"""
         self.active_pane.down()
-        self.update_ui()
+        self.update_info_panel()  # Fast update
     
     def focus_left(self):
         """Switch focus to left pane"""
@@ -379,12 +416,94 @@ class PilotFSMain(Screen):
             self.update_ui()
     
     def delete_request(self):
-        """Request file deletion"""
-        self.context_menu.show_item_context_menu()
+        """Request file deletion - RED button"""
+        # Check for multi-selected files first
+        marked = [x for x in self.active_pane.list if x[0][3]]
+        
+        if marked:
+            # Multi-select delete
+            files = [x[0][0] for x in marked]
+            self.dialogs.show_confirmation(
+                "Delete %d selected items?\n\nThis cannot be undone!" % len(files),
+                lambda res: self._execute_delete_multiple(res, files) if res else None
+            )
+        else:
+            # Single file delete
+            sel = self.active_pane.getSelection()
+            if not sel or not sel[0]:
+                self.dialogs.show_message("No file selected!", type="info")
+                return
+            
+            item_path = sel[0]
+            item_name = os.path.basename(item_path)
+            is_dir = os.path.isdir(item_path)
+            item_type = "folder" if is_dir else "file"
+            
+            self.dialogs.show_confirmation(
+                "Delete %s '%s'?\n\nThis cannot be undone!" % (item_type, item_name),
+                lambda res: self._execute_delete(res, item_path, item_name) if res else None
+            )
+    
+    def _execute_delete(self, confirmed, item_path, item_name):
+        """Execute deletion"""
+        if not confirmed:
+            return
+        
+        try:
+            self.file_ops.delete(item_path)
+            self.active_pane.refresh()
+            self.update_ui()
+            
+            if self.config.plugins.pilotfs.trash_enabled.value == "yes":
+                msg = "Moved to trash: " + item_name
+            else:
+                msg = "Permanently deleted: " + item_name
+            
+            self.dialogs.show_message(msg, type="info", timeout=2)
+        except Exception as e:
+            self.dialogs.show_message("Delete failed: " + str(e), type="error")
     
     def rename_request(self):
-        """Request file rename"""
-        self.context_menu.show_item_context_menu()
+        """Request file rename - GREEN button"""
+        # Check for multi-selected files
+        marked = [x for x in self.active_pane.list if x[0][3]]
+        
+        if len(marked) > 1:
+            # Multi-select - redirect to bulk rename
+            self.dialogs.show_message(
+                "Multiple files selected (%d items)\n\nUse MENU -> Tools -> Bulk Rename\nfor renaming multiple files" % len(marked),
+                type="info"
+            )
+            return
+        
+        # Single file rename
+        sel = self.active_pane.getSelection()
+        if not sel or not sel[0]:
+            self.dialogs.show_message("No file selected!", type="info")
+            return
+        
+        item_path = sel[0]
+        current_name = os.path.basename(item_path)
+        
+        self.session.openWithCallback(
+            lambda new_name: self._execute_rename(new_name, item_path, current_name) if new_name else None,
+            VirtualKeyBoard,
+            title="Enter new name:",
+            text=current_name
+        )
+    
+    def _execute_rename(self, new_name, old_path, old_name):
+        """Execute rename"""
+        if not new_name or new_name == old_name:
+            return
+        
+        try:
+            new_path = self.file_ops.rename(old_path, new_name)
+            self.active_pane.refresh()
+            self.update_ui()
+            self.dialogs.show_message("Renamed to: " + new_name, type="info", timeout=2)
+        except Exception as e:
+            self.dialogs.show_message("Rename failed: " + str(e), type="error")
     
     def quick_copy(self):
         """Quick copy/move operation"""
@@ -806,6 +925,75 @@ class PilotFSMain(Screen):
         
         if missing:
             logger.warning(f"Missing tools: {', '.join(missing)}")
+    
+    
+    
+    def movie_player_callback(self, *args):
+        """Callback when movie player closes - return to plugin"""
+        logger.info("Movie player closed, returning to plugin")
+        # Refresh the current view
+        self.update_ui()
+
+    
+    def play_media_file(self, path):
+        """Play media file using Enigma2 service player"""
+        try:
+            from enigma import eServiceReference, iPlayableService
+            from Screens.InfoBar import MoviePlayer
+            
+            logger.info("Playing: %s" % path)
+            
+            # Create service reference (4097 = gstreamer)
+            ref = eServiceReference(4097, 0, path)
+            ref.setName(os.path.basename(path))
+            
+            # Try to use MoviePlayer if available
+            try:
+                self.session.open(MoviePlayer, ref)
+            except:
+                # Fallback: use openWithCallback to return to plugin
+                from Screens.InfoBar import InfoBar
+                InfoBar.instance.servicelist.setCurrent(ref)
+                self.session.nav.playService(ref)
+                
+        except ImportError:
+            # Final fallback - external player
+            logger.warning("Enigma2 player not available, using external")
+            self.play_with_external_player(path)
+        except Exception as e:
+            logger.error("Playback error: %s" % str(e))
+            self.dialogs.show_message(
+                "Cannot play media file:\n%s\n\nError: %s" % (os.path.basename(path), str(e)),
+                type="error"
+            )
+    
+    def play_with_external_player(self, path):
+        """Play with external player as fallback"""
+        import subprocess
+        
+        # Try common media players
+        players = [
+            ['gst-launch-1.0', 'playbin', 'uri=file://%s' % path],
+            ['ffplay', '-autoexit', path],
+            ['mplayer', path]
+        ]
+        
+        for player_cmd in players:
+            try:
+                subprocess.Popen(player_cmd)
+                self.dialogs.show_message(
+                    "Playing with external player:\n%s" % os.path.basename(path),
+                    type="info",
+                    timeout=3
+                )
+                return
+            except FileNotFoundError:
+                continue
+        
+        self.dialogs.show_message(
+            "No media player available!\n\nInstall: opkg install gstreamer1.0",
+            type="error"
+        )
     
     def close_plugin(self):
         """Clean shutdown"""

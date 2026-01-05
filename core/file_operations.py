@@ -218,10 +218,20 @@ class FileOperations:
             raise FileOperationError(f"Create file failed: {e}")
     
     def get_file_size(self, path, use_cache=True):
-        """Get file or directory size with optional caching"""
+        """Get file or directory size - OPTIMIZED for UI"""
         try:
             if not os.path.exists(path):
                 return 0
+            
+            # For directories, return 0 immediately (too slow to calculate)
+            if os.path.isdir(path):
+                return 0
+            
+            # For files, just get the size directly
+            return os.path.getsize(path)
+            
+        except Exception:
+            return 0
             
             cache_key = f"file_size_{hash(path)}"
             

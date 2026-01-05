@@ -1,7 +1,6 @@
 import os
 import subprocess
 import threading
-import time
 from fnmatch import fnmatch
 from ..exceptions import FileOperationError
 from ..utils.validators import validate_path
@@ -10,7 +9,8 @@ from ..utils.formatters import format_size
 class SearchEngine:
     def __init__(self, cache=None):
         self.cache = cache
-        self._stop_search = False
+        # FIXED: Use threading.Event() correctly
+        self._stop_search = threading.Event()
         self._search_lock = threading.Lock()
     
     def search_files(self, directory, pattern, recursive=True, max_results=100):
@@ -21,17 +21,17 @@ class SearchEngine:
             if not os.path.isdir(directory):
                 raise FileOperationError(f"Not a directory: {directory}")
             
-            self._stop_search = False
+            self._stop_search.clear()
             results = []
             
             if recursive:
                 for root, dirs, files in os.walk(directory):
-                    if self._stop_search:
+                    if self._stop_search.is_set():
                         break
                     
                     # Search in files
                     for name in files:
-                        if self._stop_search:
+                        if self._stop_search.is_set():
                             break
                         
                         if fnmatch(name.lower(), pattern.lower()):
@@ -44,12 +44,12 @@ class SearchEngine:
                             })
                         
                         if len(results) >= max_results:
-                            self._stop_search = True
+                            self._stop_search.set()
                             break
                     
                     # Search in directory names
                     for name in dirs:
-                        if self._stop_search:
+                        if self._stop_search.is_set():
                             break
                         
                         if fnmatch(name.lower(), pattern.lower()):
@@ -62,14 +62,14 @@ class SearchEngine:
                             })
                         
                         if len(results) >= max_results:
-                            self._stop_search = True
+                            self._stop_search.set()
                             break
             else:
                 # Non-recursive search
                 try:
                     entries = os.listdir(directory)
                     for name in entries:
-                        if self._stop_search:
+                        if self._stop_search.is_set():
                             break
                         
                         if fnmatch(name.lower(), pattern.lower()):
@@ -83,7 +83,7 @@ class SearchEngine:
                             })
                         
                         if len(results) >= max_results:
-                            self._stop_search = True
+                            self._stop_search.set()
                             break
                 except Exception:
                     pass
@@ -101,7 +101,7 @@ class SearchEngine:
             if not os.path.isdir(directory):
                 raise FileOperationError(f"Not a directory: {directory}")
             
-            self._stop_search = False
+            self._stop_search.clear()
             
             # Check if grep is available
             try:
@@ -115,7 +115,6 @@ class SearchEngine:
             if recursive:
                 cmd.extend(["-r", directory])
             else:
-                # Need to pass files explicitly for non-recursive
                 try:
                     files = [f for f in os.listdir(directory) 
                             if os.path.isfile(os.path.join(directory, f))]
@@ -125,11 +124,9 @@ class SearchEngine:
                 except:
                     return []
             
-            # Add file pattern if specified
             if file_pattern and file_pattern != "*":
                 cmd.extend(["--include", file_pattern])
             
-            # Execute grep
             try:
                 result = subprocess.run(
                     cmd,
@@ -140,11 +137,11 @@ class SearchEngine:
                 
                 if result.returncode == 0:
                     files = result.stdout.strip().split('\n')
-                    files = [f for f in files if f]  # Remove empty lines
+                    files = [f for f in files if f]
                     
                     results = []
                     for file_path in files[:max_results]:
-                        if self._stop_search:
+                        if self._stop_search.is_set():
                             break
                         
                         if os.path.exists(file_path):
@@ -157,7 +154,6 @@ class SearchEngine:
                     
                     return results
                 elif result.returncode == 1:
-                    # grep returns 1 when no matches found
                     return []
                 else:
                     raise FileOperationError(f"grep error: {result.stderr[:100]}")
@@ -184,11 +180,11 @@ class SearchEngine:
             results = []
             
             for root, dirs, files in os.walk(directory):
-                if self._stop_search:
+                if self._stop_search.is_set():
                     break
                 
                 for name in files:
-                    if self._stop_search:
+                    if self._stop_search.is_set():
                         break
                     
                     full_path = os.path.join(root, name)
@@ -204,12 +200,11 @@ class SearchEngine:
                             })
                         
                         if len(results) >= max_results:
-                            self._stop_search = True
+                            self._stop_search.set()
                             break
                     except:
                         continue
             
-            # Sort by size (largest first)
             results.sort(key=lambda x: x['size'], reverse=True)
             return results
             
@@ -228,11 +223,11 @@ class SearchEngine:
             duplicates = []
             
             for root, dirs, files in os.walk(directory):
-                if self._stop_search:
+                if self._stop_search.is_set():
                     break
                 
                 for name in files:
-                    if self._stop_search:
+                    if self._stop_search.is_set():
                         break
                     
                     full_path = os.path.join(root, name)
@@ -247,7 +242,6 @@ class SearchEngine:
                     except:
                         continue
             
-            # Find keys with multiple files
             for key, paths in file_map.items():
                 if len(paths) > 1:
                     duplicates.append({
@@ -268,9 +262,9 @@ class SearchEngine:
     def stop_search(self):
         """Stop current search operation"""
         with self._search_lock:
-            self._stop_search = True
+            self._stop_search.set()
     
     def is_searching(self):
         """Check if search is in progress"""
         with self._search_lock:
-            return self._stop_search == False
+            return not self._stop_search.is_set()

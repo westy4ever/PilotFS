@@ -5,7 +5,7 @@ from datetime import datetime
 
 # Default log file path
 DEFAULT_LOG_FILE = "/tmp/pilotfs.log"
-DEFAULT_LOG_LEVEL = logging.INFO
+DEFAULT_LOG_LEVEL = logging.WARNING
 MAX_LOG_SIZE = 10 * 1024 * 1024  # 10 MB
 BACKUP_COUNT = 5
 

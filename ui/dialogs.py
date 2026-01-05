@@ -51,8 +51,8 @@ class Dialogs:
     def show_create_dialog(self, current_dir, file_ops, update_callback):
         """Show create file/folder dialog"""
         choices = [
-            ("📁 Create New Folder", "folder"),
-            ("📄 Create New File", "file")
+            ("Create New Folder", "folder"),
+            ("Create New File", "file")
         ]
         
         self.show_choice(
@@ -83,15 +83,15 @@ class Dialogs:
         try:
             if create_type == "folder":
                 new_path = file_ops.create_directory(current_dir, name)
-                msg = f"✅ Folder created:\n{name}"
+                msg = "Folder created: " + name
             else:
                 new_path = file_ops.create_file(current_dir, name)
-                msg = f"✅ File created:\n{name}"
+                msg = "File created: " + name
             
             update_callback()
             self.show_message(msg, type="info", timeout=2)
         except Exception as e:
-            self.show_message(f"Creation failed:\n{e}", type="error")
+            self.show_message("Creation failed: " + str(e), type="error")
     
     def show_create_file_dialog(self, current_dir, file_ops, update_callback):
         """Show create file dialog"""
@@ -109,155 +109,95 @@ class Dialogs:
             lambda name: self._execute_create(name, "folder", current_dir, file_ops, update_callback) if name else None
         )
     
-    def show_bulk_rename_dialog(self, files, file_ops, filelist, update_callback):
-        """Show bulk rename dialog"""
-        if len(files) < 2:
-            self.show_message("Select at least 2 files for bulk rename!", type="info")
-            return
-        
-        choices = [
-            ("Add Prefix", "prefix"),
-            ("Add Suffix", "suffix"),
-            ("Replace Text", "replace"),
-            ("Number Sequence", "number"),
-            ("Change Extension", "extension"),
-            ("Remove Pattern", "remove")
-        ]
-        
-        self.show_choice(
-            f"Bulk Rename {len(files)} files",
-            choices,
-            lambda choice: self._handle_bulk_rename_choice(choice, files, file_ops, filelist, update_callback) if choice else None
-        )
-    
-    def _handle_bulk_rename_choice(self, choice, files, file_ops, filelist, update_callback):
-        """Handle bulk rename choice"""
-        mode = choice[1]
-        
-        if mode == "prefix":
-            self.show_input("Enter prefix to add:", "", 
-                          lambda text: self._execute_bulk_rename(mode, text, None, files, file_ops, filelist, update_callback) if text else None)
-        elif mode == "suffix":
-            self.show_input("Enter suffix to add (before extension):", "", 
-                          lambda text: self._execute_bulk_rename(mode, text, None, files, file_ops, filelist, update_callback) if text else None)
-        elif mode == "replace":
-            self.show_input("Enter text to find:", "", 
-                          lambda find_text: self._handle_replace_find(find_text, mode, files, file_ops, filelist, update_callback) if find_text else None)
-        elif mode == "number":
-            self.show_input("Enter base name (numbers will be added):", "file", 
-                          lambda text: self._execute_bulk_rename(mode, text, None, files, file_ops, filelist, update_callback) if text else None)
-        elif mode == "extension":
-            self.show_input("Enter new extension (without dot):", "", 
-                          lambda text: self._execute_bulk_rename(mode, text, None, files, file_ops, filelist, update_callback) if text else None)
-        elif mode == "remove":
-            self.show_input("Enter pattern to remove:", "", 
-                          lambda text: self._execute_bulk_rename(mode, text, None, files, file_ops, filelist, update_callback) if text else None)
-    
-    def _handle_replace_find(self, find_text, mode, files, file_ops, filelist, update_callback):
-        """Handle replace find text"""
-        self.show_input(f"Replace '{find_text}' with:", "", 
-                       lambda replace_text: self._execute_bulk_rename(mode, find_text, replace_text, files, file_ops, filelist, update_callback) if replace_text else None)
-    
-    def _execute_bulk_rename(self, mode, text, replace_text, files, file_ops, filelist, update_callback):
-        """Execute bulk rename"""
-        # Generate preview
-        preview = []
-        for i, file_path in enumerate(files, 1):
-            old_name = os.path.basename(file_path)
-            name, ext = os.path.splitext(old_name)
-            
-            if mode == "prefix":
-                new_name = text + old_name
-            elif mode == "suffix":
-                new_name = name + text + ext
-            elif mode == "replace":
-                new_name = old_name.replace(text, replace_text)
-            elif mode == "number":
-                new_name = f"{text}_{i:03d}{ext}"
-            elif mode == "extension":
-                new_name = name + "." + text
-            elif mode == "remove":
-                new_name = old_name.replace(text, "")
-            else:
-                new_name = old_name
-            
-            preview.append((old_name, new_name))
-        
-        # Show preview
-        preview_text = f"Bulk Rename Preview ({len(files)} files):\n\n"
-        for old, new in preview[:10]:
-            preview_text += f"{old}\n  → {new}\n\n"
-        
-        if len(preview) > 10:
-            preview_text += f"... and {len(preview) - 10} more\n\n"
-        
-        preview_text += "Proceed with rename?"
-        
-        self.show_confirmation(
-            preview_text,
-            lambda res: self._confirm_bulk_rename(res, mode, text, replace_text, files, file_ops, filelist, update_callback)
-        )
-    
-    def _confirm_bulk_rename(self, confirmed, mode, text, replace_text, files, file_ops, filelist, update_callback):
-        """Confirm and execute bulk rename"""
-        if not confirmed:
-            return
-        
-        success = 0
-        errors = []
-        
-        for i, file_path in enumerate(files, 1):
-            try:
-                old_name = os.path.basename(file_path)
-                name, ext = os.path.splitext(old_name)
-                
-                if mode == "prefix":
-                    new_name = text + old_name
-                elif mode == "suffix":
-                    new_name = name + text + ext
-                elif mode == "replace":
-                    new_name = old_name.replace(text, replace_text)
-                elif mode == "number":
-                    new_name = f"{text}_{i:03d}{ext}"
-                elif mode == "extension":
-                    new_name = name + "." + text
-                elif mode == "remove":
-                    new_name = old_name.replace(text, "")
-                else:
-                    new_name = old_name
-                
-                file_ops.rename(file_path, new_name)
-                success += 1
-                
-            except Exception as e:
-                errors.append(f"{os.path.basename(file_path)}: {str(e)[:30]}")
-        
-        msg = f"✅ Renamed: {success} files\n"
-        if errors:
-            msg += f"\n❌ Failed: {len(errors)}\n"
-            msg += "\n".join(errors[:5])
-            if len(errors) > 5:
-                msg += f"\n... and {len(errors) - 5} more"
-        
-        filelist.refresh()
-        update_callback()
-        self.show_message(msg, type="info")
-    
     def show_transfer_dialog(self, files, destination, callback):
         """Show transfer dialog"""
         num_files = len([x for x in files if os.path.isfile(x)])
         num_dirs = len([x for x in files if os.path.isdir(x)])
         
         choices = [
-            (f"Copy {len(files)} items ({num_dirs} folders, {num_files} files)", "cp"),
-            (f"Move {len(files)} items ({num_dirs} folders, {num_files} files)", "mv")
+            ("Copy %d items (%d folders, %d files)" % (len(files), num_dirs, num_files), "cp"),
+            ("Move %d items (%d folders, %d files)" % (len(files), num_dirs, num_files), "mv")
         ]
         
         self.show_choice(
-            f"Transfer to: {destination}",
+            "Transfer to: " + destination,
             choices,
             lambda choice: callback(choice[1], files, destination) if choice else None
         )
+    
+    def show_permissions_dialog(self, files, file_ops):
+        """Show permissions dialog"""
+        choices = [
+            ("755 (rwxr-xr-x) - Executable", "755"),
+            ("644 (rw-r--r--) - Standard file", "644"),
+            ("777 (rwxrwxrwx) - Full access", "777"),
+            ("600 (rw-------) - Owner only", "600")
+        ]
+        
+        self.show_choice(
+            "Set permissions for %d items" % len(files),
+            choices,
+            lambda choice: self._execute_change_permissions(choice[1], files, file_ops) if choice else None
+        )
+    
+    def _execute_change_permissions(self, mode_str, files, file_ops):
+        """Execute permission change"""
+        try:
+            for file_path in files:
+                file_ops.change_permissions(file_path, mode_str)
+            
+            self.show_message("Permissions changed to %s for %d items" % (mode_str, len(files)), type="info")
+        except Exception as e:
+            self.show_message("Change permissions failed: " + str(e), type="error")
+    
+    def show_checksum_dialog(self, files, file_ops):
+        """Show checksum dialog"""
+        choices = [
+            ("Calculate MD5", "md5"),
+            ("Calculate SHA1", "sha1"),
+            ("Calculate SHA256", "sha256")
+        ]
+        
+        self.show_choice(
+            "Checksum for %d file(s)" % len(files),
+            choices,
+            lambda choice: self._execute_checksum(choice[1], files, file_ops) if choice else None
+        )
+    
+    def _execute_checksum(self, algorithm, files, file_ops):
+        """Execute checksum calculation"""
+        def checksum_thread():
+            results = []
+            
+            for file_path in files:
+                try:
+                    if algorithm == "md5":
+                        hasher = hashlib.md5()
+                    elif algorithm == "sha1":
+                        hasher = hashlib.sha1()
+                    else:
+                        hasher = hashlib.sha256()
+                    
+                    with open(file_path, 'rb') as f:
+                        while True:
+                            chunk = f.read(8192)
+                            if not chunk:
+                                break
+                            hasher.update(chunk)
+                    
+                    checksum = hasher.hexdigest()
+                    results.append((os.path.basename(file_path), checksum))
+                    
+                except Exception as e:
+                    results.append((os.path.basename(file_path), "ERROR: " + str(e)))
+            
+            msg = algorithm.upper() + " Checksums:\n\n"
+            for name, checksum in results:
+                msg += name + ":\n" + checksum + "\n\n"
+            
+            self.show_message(msg, type="info")
+        
+        threading.Thread(target=checksum_thread, daemon=True).start()
     
     # Archive dialogs
     def show_archive_dialog(self, files, archive_mgr, current_dir):
@@ -268,7 +208,7 @@ class Dialogs:
         ]
         
         self.show_choice(
-            f"Archive {len(files)} items",
+            "Archive %d items" % len(files),
             choices,
             lambda choice: self._handle_archive_choice(choice, files, archive_mgr, current_dir) if choice else None
         )
@@ -276,10 +216,10 @@ class Dialogs:
     def _handle_archive_choice(self, choice, files, archive_mgr, current_dir):
         """Handle archive choice"""
         archive_type = choice[1]
-        default_name = f"archive_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        default_name = "archive_" + datetime.now().strftime('%Y%m%d_%H%M%S')
         
         self.show_input(
-            f"Archive name ({archive_type.upper()}):",
+            "Archive name (" + archive_type.upper() + "):",
             default_name,
             lambda name: self._execute_create_archive(name, archive_type, files, archive_mgr, current_dir) if name else None
         )
@@ -295,9 +235,9 @@ class Dialogs:
             archive_path = os.path.join(current_dir, name)
             archive_mgr.create_archive(files, archive_path, archive_type)
             
-            self.show_message(f"✅ Archive created:\n{name}", type="info")
+            self.show_message("Archive created: " + name, type="info")
         except Exception as e:
-            self.show_message(f"Archive creation failed:\n{e}", type="error")
+            self.show_message("Archive creation failed: " + str(e), type="error")
     
     def show_extract_dialog(self, archive_path, archive_mgr, filelist, update_callback):
         """Show extract archive dialog"""
@@ -306,7 +246,7 @@ class Dialogs:
                                os.path.splitext(archive_name)[0].replace('.tar', ''))
         
         self.show_confirmation(
-            f"Extract '{archive_name}' to:\n{dest_dir}?",
+            "Extract '" + archive_name + "' to:\n" + dest_dir + "?",
             lambda res: self._execute_extract(res, archive_path, dest_dir, archive_mgr, filelist, update_callback)
         )
     
@@ -320,9 +260,9 @@ class Dialogs:
                 archive_mgr.extract_archive(archive_path, dest_dir)
                 filelist.refresh()
                 update_callback()
-                self.show_message(f"✅ Extracted to:\n{dest_dir}", type="info")
+                self.show_message("Extracted to: " + dest_dir, type="info")
             except Exception as e:
-                self.show_message(f"Extraction failed:\n{e}", type="error")
+                self.show_message("Extraction failed: " + str(e), type="error")
         
         threading.Thread(target=extract_thread, daemon=True).start()
     
@@ -342,20 +282,20 @@ class Dialogs:
                 results = search_engine.search_files(directory, pattern, recursive=True, max_results=100)
                 
                 if results:
-                    result_text = f"Found {len(results)} matches:\n\n"
+                    result_text = "Found %d matches:\n\n" % len(results)
                     for item in results[:20]:
-                        icon = "📁" if item['is_dir'] else "📄"
-                        result_text += f"{icon} {item['name']}\n"
+                        icon = "Folder" if item['is_dir'] else "File"
+                        result_text += icon + " " + item['name'] + "\n"
                     
                     if len(results) > 20:
-                        result_text += f"\n... and {len(results) - 20} more"
+                        result_text += "\n... and %d more" % (len(results) - 20)
                     
                     self.show_message(result_text, type="info")
                 else:
-                    self.show_message(f"No files found matching: {pattern}", type="info")
+                    self.show_message("No files found matching: " + pattern, type="info")
                     
             except Exception as e:
-                self.show_message(f"Search failed: {e}", type="error")
+                self.show_message("Search failed: " + str(e), type="error")
         
         threading.Thread(target=search_thread, daemon=True).start()
     
@@ -374,19 +314,19 @@ class Dialogs:
                 results = search_engine.search_content(directory, pattern, recursive=True, max_results=50)
                 
                 if results:
-                    result_text = f"Found '{pattern}' in {len(results)} file(s):\n\n"
+                    result_text = "Found '%s' in %d file(s):\n\n" % (pattern, len(results))
                     for item in results[:20]:
-                        result_text += f"📄 {item['name']}\n"
+                        result_text += "File: " + item['name'] + "\n"
                     
                     if len(results) > 20:
-                        result_text += f"\n... and {len(results) - 20} more"
+                        result_text += "\n... and %d more" % (len(results) - 20)
                     
                     self.show_message(result_text, type="info")
                 else:
-                    self.show_message(f"No files contain: {pattern}", type="info")
+                    self.show_message("No files contain: " + pattern, type="info")
                     
             except Exception as e:
-                self.show_message(f"Search failed: {e}", type="error")
+                self.show_message("Search failed: " + str(e), type="error")
         
         threading.Thread(target=search_thread, daemon=True).start()
     
@@ -397,20 +337,18 @@ class Dialogs:
             self.show_message("Cannot preview directory!\n\nPress OK to enter folder.", type="info")
             return
         
-        # Check file size
         try:
             size = file_ops.get_file_size(file_path)
             max_size = int(config.plugins.pilotfs.preview_size.value) * 1024
             if size > max_size:
                 self.show_message(
-                    f"File too large to preview!\n\nSize: {format_size(size)}\nLimit: {format_size(max_size)}",
+                    "File too large to preview!\n\nSize: " + format_size(size) + "\nLimit: " + format_size(max_size),
                     type="info"
                 )
                 return
         except:
             pass
         
-        # Determine preview type
         ext = os.path.splitext(file_path)[1].lower()
         
         if ext in ['.txt', '.log', '.conf', '.cfg', '.ini', '.xml', '.json', '.py', '.sh', '.md']:
@@ -426,12 +364,12 @@ class Dialogs:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 lines = []
                 for i, line in enumerate(f):
-                    if i >= 50:  # First 50 lines
+                    if i >= 50:
                         break
                     lines.append(line)
                 content = ''.join(lines)
             
-            preview = f"📄 {os.path.basename(file_path)}\n"
+            preview = "File: " + os.path.basename(file_path) + "\n"
             preview += "=" * 40 + "\n\n"
             preview += content
             
@@ -440,24 +378,24 @@ class Dialogs:
             
             self.show_message(preview, type="info")
         except Exception as e:
-            self.show_message(f"Cannot preview file:\n{e}", type="error")
+            self.show_message("Cannot preview file: " + str(e), type="error")
     
     def _preview_image(self, file_path, file_ops):
         """Preview image file"""
         try:
             info = file_ops.get_file_info(file_path)
             
-            preview = f"🖼️ Image Preview\n\n"
-            preview += f"File: {info['name']}\n"
-            preview += f"Size: {info['size_formatted']}\n"
-            preview += f"Type: {os.path.splitext(file_path)[1].upper()}\n"
-            preview += f"Modified: {info['modified'].strftime('%Y-%m-%d %H:%M')}\n\n"
+            preview = "Image Preview\n\n"
+            preview += "File: " + info['name'] + "\n"
+            preview += "Size: " + info['size_formatted'] + "\n"
+            preview += "Type: " + os.path.splitext(file_path)[1].upper() + "\n"
+            preview += "Modified: " + info['modified'].strftime('%Y-%m-%d %H:%M') + "\n\n"
             preview += "Image preview requires media viewer.\n"
             preview += "Use file browser to open image."
             
             self.show_message(preview, type="info")
         except Exception as e:
-            self.show_message(f"Cannot preview image:\n{e}", type="error")
+            self.show_message("Cannot preview image: " + str(e), type="error")
     
     def preview_image(self, file_path, file_ops):
         """Preview image (public wrapper)"""
@@ -467,45 +405,41 @@ class Dialogs:
         """Preview binary file"""
         try:
             with open(file_path, 'rb') as f:
-                data = f.read(256)  # First 256 bytes
+                data = f.read(256)
             
-            # Create hex dump
-            preview = f"🔢 Binary Preview: {os.path.basename(file_path)}\n"
+            preview = "Binary Preview: " + os.path.basename(file_path) + "\n"
             preview += "=" * 40 + "\n\n"
             
             for i in range(0, min(len(data), 128), 16):
                 chunk = data[i:i+16]
-                hex_str = ' '.join(f'{b:02x}' for b in chunk)
+                hex_str = ' '.join('%02x' % b for b in chunk)
                 ascii_str = ''.join(chr(b) if 32 <= b < 127 else '.' for b in chunk)
-                preview += f"{i:04x}  {hex_str:<48}  {ascii_str}\n"
+                preview += "%04x  %-48s  %s\n" % (i, hex_str, ascii_str)
             
             if len(data) > 128:
                 preview += "\n... (showing first 128 bytes)"
             
             self.show_message(preview, type="info")
         except Exception as e:
-            self.show_message(f"Cannot preview file:\n{e}", type="error")
+            self.show_message("Cannot preview file: " + str(e), type="error")
     
     def preview_media(self, file_path, config):
         """Preview media file"""
-        # This would be implemented with Enigma2 player
-        # For now, just show info
         try:
-            info = f"🎬 Media File: {os.path.basename(file_path)}\n\n"
-            info += f"Path: {file_path}\n\n"
+            info = "Media File: " + os.path.basename(file_path) + "\n\n"
+            info += "Path: " + file_path + "\n\n"
             info += "Media playback would start here.\n"
             info += "Press PLAY button to play with external player."
             
             self.show_message(info, type="info")
         except Exception as e:
-            self.show_message(f"Media preview error:\n{e}", type="error")
+            self.show_message("Media preview error: " + str(e), type="error")
     
     # System dialogs
     def show_disk_usage(self, directory, file_ops):
         """Show disk usage analysis"""
         def analyze_thread():
             try:
-                # Get directory contents
                 entries = []
                 total_size = 0
                 
@@ -525,173 +459,69 @@ class Dialogs:
                 except:
                     pass
                 
-                # Sort by size
                 entries.sort(key=lambda x: x['size'], reverse=True)
                 
-                result = f"📊 Disk Usage Analysis\n{directory}\n\n"
-                result += f"Total: {format_size(total_size)}\n\n"
+                result = "Disk Usage Analysis\n" + directory + "\n\n"
+                result += "Total: " + format_size(total_size) + "\n\n"
                 
                 for item in entries[:15]:
                     percent = (item['size'] / total_size * 100) if total_size > 0 else 0
-                    icon = "📁" if item['is_dir'] else "📄"
-                    result += f"{icon} {item['name']}: {format_size(item['size'])} ({percent:.1f}%)\n"
+                    icon = "Folder" if item['is_dir'] else "File"
+                    result += "%s %s: %s (%.1f%%)\n" % (icon, item['name'], format_size(item['size']), percent)
                 
                 if len(entries) > 15:
-                    result += f"\n... and {len(entries) - 15} more items"
+                    result += "\n... and %d more items" % (len(entries) - 15)
                 
                 self.show_message(result, type="info")
             except Exception as e:
-                self.show_message(f"Analysis failed:\n{e}", type="error")
+                self.show_message("Analysis failed: " + str(e), type="error")
         
         threading.Thread(target=analyze_thread, daemon=True).start()
     
-    def show_permissions_dialog(self, files, file_ops):
-        """Show permissions dialog"""
-        choices = [
-            ("755 (rwxr-xr-x) - Executable", "755"),
-            ("644 (rw-r--r--) - Standard file", "644"),
-            ("777 (rwxrwxrwx) - Full access", "777"),
-            ("600 (rw-------) - Owner only", "600")
+    # Storage selector
+    def show_storage_selector(self, change_dir_callback, update_callback):
+        """Show storage selector"""
+        choices = []
+        
+        storage_locations = [
+            ("Internal Hard Disk", "/media/hdd"),
+            ("USB Storage", "/media/usb"),
+            ("USB 1", "/media/usb1"),
+            ("USB 2", "/media/usb2"),
+            ("Network Mounts", "/media/net"),
+            ("Root Filesystem", "/"),
+            ("System Temp", "/tmp"),
+            ("Flash Memory", "/media/mmc"),
+            ("SD Card", "/media/sdcard"),
         ]
         
-        self.show_choice(
-            f"Set permissions for {len(files)} items",
-            choices,
-            lambda choice: self._execute_change_permissions(choice[1], files, file_ops) if choice else None
-        )
-    
-    def _execute_change_permissions(self, mode_str, files, file_ops):
-        """Execute permission change"""
-        try:
-            for file_path in files:
-                file_ops.change_permissions(file_path, mode_str)
-            
-            self.show_message(f"✅ Permissions changed to {mode_str} for {len(files)} items", type="info")
-        except Exception as e:
-            self.show_message(f"Change permissions failed:\n{e}", type="error")
-    
-    def show_checksum_dialog(self, files, file_ops):
-        """Show checksum dialog"""
-        choices = [
-            ("Calculate MD5", "md5"),
-            ("Calculate SHA1", "sha1"),
-            ("Calculate SHA256", "sha256")
-        ]
-        
-        self.show_choice(
-            f"Checksum for {len(files)} file(s)",
-            choices,
-            lambda choice: self._execute_checksum(choice[1], files, file_ops) if choice else None
-        )
-    
-    def _execute_checksum(self, algorithm, files, file_ops):
-        """Execute checksum calculation"""
-        def checksum_thread():
-            results = []
-            
-            for file_path in files:
+        for label, path in storage_locations:
+            if os.path.isdir(path):
                 try:
-                    if algorithm == "md5":
-                        hasher = hashlib.md5()
-                    elif algorithm == "sha1":
-                        hasher = hashlib.sha1()
-                    else:
-                        hasher = hashlib.sha256()
-                    
-                    # Read file in chunks
-                    with open(file_path, 'rb') as f:
-                        while True:
-                            chunk = f.read(8192)
-                            if not chunk:
-                                break
-                            hasher.update(chunk)
-                    
-                    checksum = hasher.hexdigest()
-                    results.append((os.path.basename(file_path), checksum))
-                    
-                except Exception as e:
-                    results.append((os.path.basename(file_path), f"ERROR: {e}"))
-            
-            msg = f"{algorithm.upper()} Checksums:\n\n"
-            for name, checksum in results:
-                msg += f"{name}:\n{checksum}\n\n"
-            
-            self.show_message(msg, type="info")
+                    st = os.statvfs(path)
+                    free_gb = (st.f_bavail * st.f_frsize) / (1024**3)
+                    display = "%s (%.1fGB free)" % (label, free_gb)
+                    choices.append((display, path))
+                except:
+                    choices.append((label, path))
         
-        threading.Thread(target=checksum_thread, daemon=True).start()
+        if choices:
+            self.show_choice(
+                "Select Storage Location",
+                choices,
+                lambda choice: self._select_storage(choice, change_dir_callback, update_callback) if choice else None
+            )
+        else:
+            self.show_message("No storage devices found!", type="info")
     
-    # Network dialogs
-    def show_mount_dialog(self, mount_point, mount_mgr, filelist, update_callback):
-        """Show mount dialog"""
-        self.show_input(
-            "Enter Remote IP:",
-            "",
-            lambda ip: self._execute_mount(ip, mount_point, mount_mgr, filelist, update_callback) if ip else None
-        )
-    
-    def _execute_mount(self, ip, mount_point, mount_mgr, filelist, update_callback):
-        """Execute mount"""
-        def mount_thread():
-            try:
-                success, message = mount_mgr.mount_cifs(ip, "Harddisk", mount_point)
-                if success:
-                    filelist.changeDir(mount_point)
-                    filelist.refresh()
-                    update_callback()
-                    self.show_message(f"✅ {message}", type="info", timeout=3)
-                else:
-                    self.show_message(f"❌ {message}", type="error")
-            except Exception as e:
-                self.show_message(f"Mount error: {e}", type="error")
-        
-        threading.Thread(target=mount_thread, daemon=True).start()
-    
-    def show_network_scan_dialog(self, mount_mgr):
-        """Show network scan dialog"""
-        self.show_input(
-            "Enter IP to scan:",
-            "",
-            lambda ip: self._execute_network_scan(ip, mount_mgr) if ip else None
-        )
-    
-    def _execute_network_scan(self, ip, mount_mgr):
-        """Execute network scan"""
-        def scan_thread():
-            try:
-                success, result = mount_mgr.scan_network_shares(ip)
-                if success:
-                    msg = f"Network Scan Results for {ip}:\n\n"
-                    for share in result:
-                        msg += f"• {share['name']} ({share['type']})\n"
-                    self.show_message(msg, type="info")
-                else:
-                    self.show_message(f"Scan failed: {result}", type="error")
-            except Exception as e:
-                self.show_message(f"Scan error: {e}", type="error")
-        
-        threading.Thread(target=scan_thread, daemon=True).start()
-    
-    def show_ping_dialog(self, mount_mgr):
-        """Show ping dialog"""
-        self.show_input(
-            "Enter IP to ping:",
-            "192.168.1.1",
-            lambda ip: self._execute_ping(ip, mount_mgr) if ip else None
-        )
-    
-    def _execute_ping(self, ip, mount_mgr):
-        """Execute ping"""
-        def ping_thread():
-            try:
-                success, message = mount_mgr.test_ping(ip)
-                if success:
-                    self.show_message(f"✅ {message}", type="info")
-                else:
-                    self.show_message(f"❌ {message}", type="error")
-            except Exception as e:
-                self.show_message(f"Ping error: {e}", type="error")
-        
-        threading.Thread(target=ping_thread, daemon=True).start()
+    def _select_storage(self, choice, change_dir_callback, update_callback):
+        """Select storage location"""
+        path = choice[1]
+        if os.path.isdir(path):
+            change_dir_callback(path)
+            update_callback()
+        else:
+            self.show_message("Storage not accessible: " + path, type="error")
     
     # Bookmark dialogs
     def show_bookmark_dialog(self, path, bookmarks, config):
@@ -709,7 +539,7 @@ class Dialogs:
             if 1 <= num <= 9:
                 bookmarks[str(num)] = path
                 config.save_bookmarks(bookmarks)
-                self.show_message(f"✅ Bookmark {num} set to:\n{os.path.basename(path)}", type="info", timeout=2)
+                self.show_message("Bookmark %d set to: %s" % (num, os.path.basename(path)), type="info", timeout=2)
             else:
                 self.show_message("Please enter a number 1-9", type="error")
         except ValueError:
@@ -721,7 +551,7 @@ class Dialogs:
             self.show_message("No bookmarks saved.\n\nPress 1-9 in any folder to create a bookmark!", type="info")
             return
         
-        bookmark_list = [(f"Bookmark {k}: {v}", k) for k, v in sorted(bookmarks.items())]
+        bookmark_list = [("Bookmark %s: %s" % (k, v), k) for k, v in sorted(bookmarks.items())]
         bookmark_list.append(("Clear All Bookmarks", "clear"))
         
         self.show_choice(
@@ -739,14 +569,13 @@ class Dialogs:
                 lambda res: self._clear_bookmarks(res, bookmarks, config) if res else None
             )
         else:
-            # Go to bookmark
             if key in bookmarks:
                 path = bookmarks[key]
                 if os.path.isdir(path):
                     filelist.changeDir(path)
                     update_callback()
                 else:
-                    self.show_message(f"Bookmark path not found: {path}", type="error")
+                    self.show_message("Bookmark path not found: " + path, type="error")
     
     def _clear_bookmarks(self, confirmed, bookmarks, config):
         """Clear bookmarks"""
@@ -771,18 +600,18 @@ class Dialogs:
                 return
             
             choices = [
-                (f"Open Trash Folder ({len(items)} items)", "open"),
+                ("Open Trash Folder (%d items)" % len(items), "open"),
                 ("Empty Trash (Permanent Delete)", "empty"),
                 ("Restore All Items", "restore_all")
             ]
             
             self.show_choice(
-                "🗑️ Trash Management",
+                "Trash Management",
                 choices,
                 lambda choice: self._handle_trash_action(choice, file_ops, filelist, update_callback) if choice else None
             )
         except Exception as e:
-            self.show_message(f"Trash error: {e}", type="error")
+            self.show_message("Trash error: " + str(e), type="error")
     
     def _handle_trash_action(self, choice, file_ops, filelist, update_callback):
         """Handle trash action"""
@@ -811,9 +640,9 @@ class Dialogs:
             file_ops.empty_trash()
             filelist.refresh()
             update_callback()
-            self.show_message("✅ Trash emptied successfully", type="info")
+            self.show_message("Trash emptied successfully", type="info")
         except Exception as e:
-            self.show_message(f"Empty trash failed:\n{e}", type="error")
+            self.show_message("Empty trash failed: " + str(e), type="error")
     
     def _restore_all_from_trash(self, confirmed, file_ops, filelist, update_callback):
         """Restore all from trash"""
@@ -833,93 +662,165 @@ class Dialogs:
                 except:
                     failed += 1
             
-            msg = f"✅ Restored: {restored} items"
+            msg = "Restored: %d items" % restored
             if failed > 0:
-                msg += f"\n❌ Failed: {failed} items"
+                msg += "\nFailed: %d items" % failed
             
             filelist.refresh()
             update_callback()
             self.show_message(msg, type="info")
         except Exception as e:
-            self.show_message(f"Restore failed:\n{e}", type="error")
+            self.show_message("Restore failed: " + str(e), type="error")
     
-    # Storage selector
-    def show_storage_selector(self, change_dir_callback, update_callback):
-        """Show storage selector"""
-        choices = []
+    # Network dialogs - stubs for now
+    def show_mount_dialog(self, mount_point, mount_mgr, filelist, update_callback):
+        """Show mount dialog"""
+        self.show_message("Mount remote - feature coming soon", type="info")
+    
+    def show_network_scan_dialog(self, mount_mgr):
+        """Show network scan dialog"""
+        self.show_message("Network scan - feature coming soon", type="info")
+    
+    def show_ping_dialog(self, mount_mgr):
+        """Show ping dialog"""
+        self.show_message("Ping test - feature coming soon", type="info")
+    
+    def show_remote_access_dialog(self, remote_mgr, mount_mgr, filelist, update_callback):
+        """Show remote access dialog"""
+        self.show_message("Remote access - feature coming soon", type="info")
+    
+    # System tools dialogs - stubs for now
+    def show_cleanup_dialog(self):
+        """Show cleanup dialog"""
+        self.show_message("System cleanup - feature coming soon", type="info")
+    
+    def show_picon_repair_dialog(self):
+        """Show picon repair dialog"""
+        self.show_message("Picon repair - feature coming soon", type="info")
+    
+    def show_cloud_sync_dialog(self):
+        """Show cloud sync dialog"""
+        self.show_message("Cloud sync - feature coming soon", type="info")
+    
+    def show_repair_dialog(self):
+        """Show repair dialog"""
+        self.show_message("System repair - feature coming soon", type="info")
+    
+    def show_queue_dialog(self, operation_in_progress, current, total):
+        """Show queue dialog"""
+        if operation_in_progress:
+            msg = "Operation in progress:\n\nProgress: %s / %s\n\nPlease wait for current operation to complete." % (current if current is not None else 0, total if total is not None else 0)
+        else:
+            msg = "No operations currently running.\n\nSystem is idle."
         
-        # Common storage locations
-        storage_locations = [
-            ("💿 Internal Hard Disk", "/media/hdd"),
-            ("💾 USB Storage", "/media/usb"),
-            ("💾 USB 1", "/media/usb1"),
-            ("💾 USB 2", "/media/usb2"),
-            ("🌐 Network Mounts", "/media/net"),
-            ("🏠 Root Filesystem", "/"),
-            ("⚙️ System Temp", "/tmp"),
-            ("📦 Flash Memory", "/media/mmc"),
-            ("📱 SD Card", "/media/sdcard"),
-        ]
-        
-        for label, path in storage_locations:
-            if os.path.isdir(path):
-                try:
-                    import os
-                    st = os.statvfs(path)
-                    free_gb = (st.f_bavail * st.f_frsize) / (1024**3)
-                    display = f"{label} ({free_gb:.1f}GB free)"
-                    choices.append((display, path))
-                except:
-                    choices.append((label, path))
-        
-        # Also scan /media for any other mounted devices
+        self.show_message(msg, type="info")
+    
+    def show_log_viewer(self):
+        """Show log viewer"""
         try:
-            if os.path.isdir("/media"):
-                for item in os.listdir("/media"):
-                    item_path = os.path.join("/media", item)
-                    if os.path.isdir(item_path) and item_path not in [loc[1] for loc in storage_locations]:
-                        try:
-                            st = os.statvfs(item_path)
-                            free_gb = (st.f_bavail * st.f_frsize) / (1024**3)
-                            display = f"📂 {item} ({free_gb:.1f}GB free)"
-                            choices.append((display, item_path))
-                        except:
-                            choices.append((f"📂 {item}", item_path))
-        except:
-            pass
+            with open(LOG_FILE, 'r') as f:
+                lines = f.readlines()
+                recent = ''.join(lines[-30:])
+                self.show_message(recent, type="info")
+        except Exception as e:
+            self.show_message("Could not read log: " + str(e), type="error")
+    
+    # Bulk rename - stub for now
+    def show_bulk_rename_dialog(self, files, file_ops, filelist, update_callback):
+        """Show bulk rename dialog"""
+        self.show_message("Bulk rename - feature coming soon\n\nThis feature requires VirtualKeyBoard", type="info")
+    
+    # Property for SetupScreen
+    @property
+    def SetupScreen(self):
+        """Get setup screen class"""
+        return PilotFSSetup
+
+    # Network dialogs - FULL implementations
+    def show_mount_dialog(self, mount_point, mount_mgr, filelist, update_callback):
+        """Show mount dialog"""
+        self.show_input(
+            "Enter Remote IP:",
+            "",
+            lambda ip: self._execute_mount(ip, mount_point, mount_mgr, filelist, update_callback) if ip else None
+        )
+    
+    def _execute_mount(self, ip, mount_point, mount_mgr, filelist, update_callback):
+        """Execute mount"""
+        def mount_thread():
+            try:
+                success, message = mount_mgr.mount_cifs(ip, "Harddisk", mount_point)
+                if success:
+                    filelist.changeDir(mount_point)
+                    filelist.refresh()
+                    update_callback()
+                    self.show_message("Success: " + message, type="info", timeout=3)
+                else:
+                    self.show_message("Error: " + message, type="error")
+            except Exception as e:
+                self.show_message("Mount error: " + str(e), type="error")
         
-        if choices:
-            self.show_choice(
-                "📂 Select Storage Location",
-                choices,
-                lambda choice: self._select_storage(choice, change_dir_callback, update_callback) if choice else None
-            )
-        else:
-            self.show_message("No storage devices found!", type="info")
+        threading.Thread(target=mount_thread, daemon=True).start()
     
-    def _select_storage(self, choice, change_dir_callback, update_callback):
-        """Select storage location"""
-        path = choice[1]
-        if os.path.isdir(path):
-            change_dir_callback(path)
-            update_callback()
-        else:
-            self.show_message(f"Storage not accessible:\n{path}", type="error")
+    def show_network_scan_dialog(self, mount_mgr):
+        """Show network scan dialog"""
+        self.show_input(
+            "Enter IP to scan:",
+            "",
+            lambda ip: self._execute_network_scan(ip, mount_mgr) if ip else None
+        )
     
-    # Remote access
+    def _execute_network_scan(self, ip, mount_mgr):
+        """Execute network scan"""
+        def scan_thread():
+            try:
+                success, result = mount_mgr.scan_network_shares(ip)
+                if success:
+                    msg = "Network Scan Results for %s:\n\n" % ip
+                    for share in result:
+                        msg += "Share: %s (%s)\n" % (share['name'], share['type'])
+                    self.show_message(msg, type="info")
+                else:
+                    self.show_message("Scan failed: " + result, type="error")
+            except Exception as e:
+                self.show_message("Scan error: " + str(e), type="error")
+        
+        threading.Thread(target=scan_thread, daemon=True).start()
+    
+    def show_ping_dialog(self, mount_mgr):
+        """Show ping dialog"""
+        self.show_input(
+            "Enter IP to ping:",
+            "192.168.1.1",
+            lambda ip: self._execute_ping(ip, mount_mgr) if ip else None
+        )
+    
+    def _execute_ping(self, ip, mount_mgr):
+        """Execute ping"""
+        def ping_thread():
+            try:
+                success, message = mount_mgr.test_ping(ip)
+                if success:
+                    self.show_message("Success: " + message, type="info")
+                else:
+                    self.show_message("Error: " + message, type="error")
+            except Exception as e:
+                self.show_message("Ping error: " + str(e), type="error")
+        
+        threading.Thread(target=ping_thread, daemon=True).start()
+    
     def show_remote_access_dialog(self, remote_mgr, mount_mgr, filelist, update_callback):
         """Show remote access dialog"""
         choices = [
-            ("🔗 Manage Saved Connections", "manage"),
-            ("📡 FTP Client", "ftp"),
-            ("🔐 SFTP Client (SSH)", "sftp"),
-            ("🌐 WebDAV Client", "webdav"),
-            ("☁️ Cloud Services", "cloud"),
-            ("📡 Test Connection", "test"),
+            ("Manage Saved Connections", "manage"),
+            ("FTP Client", "ftp"),
+            ("SFTP Client (SSH)", "sftp"),
+            ("WebDAV Client", "webdav"),
+            ("Test Connection", "test"),
         ]
         
         self.show_choice(
-            "🌐 Remote File Access",
+            "Remote File Access",
             choices,
             lambda choice: self._handle_remote_access(choice, remote_mgr, mount_mgr, filelist, update_callback) if choice else None
         )
@@ -936,8 +837,6 @@ class Dialogs:
             self.show_message("SFTP requires sshpass to be installed:\n\nopkg install sshpass", type="info")
         elif action == "webdav":
             self.show_message("WebDAV requires curl to be installed:\n\nopkg install curl", type="info")
-        elif action == "cloud":
-            self.show_message("Cloud Services require rclone:\n\nopkg install rclone\nrclone config", type="info")
         elif action == "test":
             self.show_ping_dialog(mount_mgr)
     
@@ -950,13 +849,13 @@ class Dialogs:
         else:
             choices = []
             for name, conn in connections.items():
-                display = f"{name} ({conn['type']}://{conn['host']})"
+                display = "%s (%s://%s)" % (name, conn['type'], conn['host'])
                 choices.append((display, name))
             choices.append(("Add New Connection", "add"))
             choices.append(("Clear All Connections", "clear"))
         
         self.show_choice(
-            "🔗 Manage Remote Connections",
+            "Manage Remote Connections",
             choices,
             lambda choice: self._handle_connection_management(choice, remote_mgr) if choice else None
         )
@@ -966,25 +865,11 @@ class Dialogs:
         action = choice[1]
         
         if action == "add":
-            self.show_message("Use Tools → Mount Remote for adding connections", type="info")
+            self.show_message("Use Tools -> Mount Remote for adding connections", type="info")
         elif action == "clear":
             self.show_confirmation(
                 "Clear all saved connections?",
                 lambda res: self._clear_connections(res, remote_mgr) if res else None
-            )
-        else:
-            # Show connection options
-            conn_name = action
-            choices = [
-                ("Connect", "connect"),
-                ("Test Connection", "test"),
-                ("Delete", "delete"),
-            ]
-            
-            self.show_choice(
-                f"Connection: {conn_name}",
-                choices,
-                lambda action_choice: self._handle_connection_action(action_choice, conn_name, remote_mgr) if action_choice else None
             )
     
     def _clear_connections(self, confirmed, remote_mgr):
@@ -994,46 +879,11 @@ class Dialogs:
         
         try:
             remote_mgr.clear_connections()
-            self.show_message("✅ All connections cleared!", type="info")
+            self.show_message("All connections cleared!", type="info")
         except Exception as e:
-            self.show_message(f"Failed to clear connections: {e}", type="error")
+            self.show_message("Failed to clear connections: " + str(e), type="error")
     
-    def _handle_connection_action(self, action_choice, conn_name, remote_mgr):
-        """Handle connection action"""
-        action = action_choice[1]
-        
-        if action == "delete":
-            self.show_confirmation(
-                f"Delete connection '{conn_name}'?",
-                lambda res: self._delete_connection(res, conn_name, remote_mgr) if res else None
-            )
-        elif action == "test":
-            def test_thread():
-                try:
-                    success, message = remote_mgr.test_connection(conn_name)
-                    if success:
-                        self.show_message(f"✅ {message}", type="info")
-                    else:
-                        self.show_message(f"❌ {message}", type="error")
-                except Exception as e:
-                    self.show_message(f"Test failed: {e}", type="error")
-            
-            threading.Thread(target=test_thread, daemon=True).start()
-    
-    def _delete_connection(self, confirmed, conn_name, remote_mgr):
-        """Delete connection"""
-        if not confirmed:
-            return
-        
-        try:
-            if remote_mgr.remove_connection(conn_name):
-                self.show_message(f"✅ Connection '{conn_name}' deleted!", type="info")
-            else:
-                self.show_message("Connection not found!", type="error")
-        except Exception as e:
-            self.show_message(f"Delete failed: {e}", type="error")
-    
-    # System tools dialogs
+    # System tools dialogs - FULL implementations
     def show_cleanup_dialog(self):
         """Show cleanup dialog"""
         self.show_confirmation(
@@ -1053,16 +903,16 @@ class Dialogs:
                 
                 for pattern in log_paths:
                     try:
-                        result = subprocess.run(["sh", "-c", f"rm -f {pattern}"], 
+                        result = subprocess.run(["sh", "-c", "rm -f " + pattern], 
                                               capture_output=True, timeout=5)
                         if result.returncode == 0:
                             removed += 1
                     except:
                         pass
                 
-                self.show_message(f"✅ Logs cleaned from {removed} locations!", type="info")
+                self.show_message("Logs cleaned from %d locations!" % removed, type="info")
             except Exception as e:
-                self.show_message(f"Cleanup failed: {e}", type="error")
+                self.show_message("Cleanup failed: " + str(e), type="error")
         
         threading.Thread(target=cleanup_thread, daemon=True).start()
     
@@ -1084,30 +934,28 @@ class Dialogs:
                 picon_target = "/usr/share/enigma2/picon"
                 
                 if not os.path.isdir(picon_source):
-                    self.show_message(f"Picon source not found: {picon_source}", type="error")
+                    self.show_message("Picon source not found: " + picon_source, type="error")
                     return
                 
-                # Remove existing link or directory
                 if os.path.islink(picon_target):
                     os.unlink(picon_target)
                 elif os.path.exists(picon_target):
                     self.show_message("Picon target exists but is not a symlink!", type="error")
                     return
                 
-                # Create new symlink
                 os.symlink(picon_source, picon_target)
-                self.show_message("✅ Picon link repaired successfully!", type="info")
+                self.show_message("Picon link repaired successfully!", type="info")
             except Exception as e:
-                self.show_message(f"Picon repair failed: {e}", type="error")
+                self.show_message("Picon repair failed: " + str(e), type="error")
         
         threading.Thread(target=repair_thread, daemon=True).start()
     
     def show_cloud_sync_dialog(self):
         """Show cloud sync dialog"""
         self.show_message(
-            "Cloud Sync requires rclone to be configured.\n\n"
-            "1. Install: opkg install rclone\n"
-            "2. Configure: rclone config\n"
+            "Cloud Sync requires rclone to be configured.\n\n" +
+            "1. Install: opkg install rclone\n" +
+            "2. Configure: rclone config\n" +
             "3. Use sync command in terminal",
             type="info"
         )
@@ -1128,7 +976,6 @@ class Dialogs:
             try:
                 packages = ['rclone', 'zip', 'unzip', 'tar', 'cifs-utils', 'samba-client', 'curl', 'ftp', 'sshfs']
                 
-                # Update package list
                 subprocess.run(["opkg", "update"], capture_output=True, timeout=60)
                 
                 installed = []
@@ -1144,44 +991,220 @@ class Dialogs:
                     except:
                         failed.append(pkg)
                 
-                msg = f"✅ Installed: {len(installed)}\n"
+                msg = "Installed: %d\n" % len(installed)
                 if installed:
-                    msg += "\n".join(f"  • {p}" for p in installed)
+                    msg += "\n".join("  - " + p for p in installed)
                 
                 if failed:
-                    msg += f"\n\n❌ Failed: {len(failed)}\n"
-                    msg += "\n".join(f"  • {p}" for p in failed)
+                    msg += "\n\nFailed: %d\n" % len(failed)
+                    msg += "\n".join("  - " + p for p in failed)
                 
                 self.show_message(msg, type="info")
             except Exception as e:
-                self.show_message(f"Repair failed: {e}", type="error")
+                self.show_message("Repair failed: " + str(e), type="error")
         
         threading.Thread(target=repair_thread, daemon=True).start()
-    
-    def show_queue_dialog(self, operation_in_progress, current, total):
-        """Show queue/task dialog"""
-        if operation_in_progress:
-            msg = f"⚙️ Operation in progress:\n\n"
-            msg += f"Progress: {current} / {total}\n\n"
-            msg += "Please wait for current operation to complete."
-        else:
-            msg = "No operations currently running.\n\n"
-            msg += "System is idle."
+
+    # FULL Bulk Rename Implementation
+    def show_bulk_rename_dialog(self, files, file_ops, filelist, update_callback):
+        """Show bulk rename dialog - FULL implementation"""
+        if len(files) < 2:
+            self.show_message("Select at least 2 files for bulk rename!", type="info")
+            return
         
+        choices = [
+            ("Add Prefix", "prefix"),
+            ("Add Suffix", "suffix"),
+            ("Replace Text", "replace"),
+            ("Number Sequence", "number"),
+            ("Change Extension", "extension"),
+            ("Remove Pattern", "remove"),
+            ("Uppercase", "upper"),
+            ("Lowercase", "lower")
+        ]
+        
+        self.show_choice(
+            "Bulk Rename %d files" % len(files),
+            choices,
+            lambda choice: self._handle_bulk_rename_choice(choice, files, file_ops, filelist, update_callback) if choice else None
+        )
+    
+    def _handle_bulk_rename_choice(self, choice, files, file_ops, filelist, update_callback):
+        """Handle bulk rename choice"""
+        mode = choice[1]
+        
+        if mode in ["upper", "lower"]:
+            # Direct execution for case changes
+            self._execute_bulk_rename_case(mode, files, file_ops, filelist, update_callback)
+        elif mode == "prefix":
+            self.show_input("Enter prefix to add:", "", 
+                          lambda text: self._execute_bulk_rename(mode, text, None, files, file_ops, filelist, update_callback) if text else None)
+        elif mode == "suffix":
+            self.show_input("Enter suffix (before extension):", "", 
+                          lambda text: self._execute_bulk_rename(mode, text, None, files, file_ops, filelist, update_callback) if text else None)
+        elif mode == "replace":
+            self.show_input("Enter text to find:", "", 
+                          lambda find_text: self._handle_replace_find(find_text, mode, files, file_ops, filelist, update_callback) if find_text else None)
+        elif mode == "number":
+            self.show_input("Enter base name (numbers added):", "file", 
+                          lambda text: self._execute_bulk_rename(mode, text, None, files, file_ops, filelist, update_callback) if text else None)
+        elif mode == "extension":
+            self.show_input("Enter new extension (no dot):", "", 
+                          lambda text: self._execute_bulk_rename(mode, text, None, files, file_ops, filelist, update_callback) if text else None)
+        elif mode == "remove":
+            self.show_input("Enter pattern to remove:", "", 
+                          lambda text: self._execute_bulk_rename(mode, text, None, files, file_ops, filelist, update_callback) if text else None)
+    
+    def _handle_replace_find(self, find_text, mode, files, file_ops, filelist, update_callback):
+        """Handle replace find text"""
+        self.show_input("Replace '%s' with:" % find_text, "", 
+                       lambda replace_text: self._execute_bulk_rename(mode, find_text, replace_text, files, file_ops, filelist, update_callback) if replace_text is not None else None)
+    
+    def _execute_bulk_rename_case(self, mode, files, file_ops, filelist, update_callback):
+        """Execute case change bulk rename"""
+        preview = []
+        for file_path in files:
+            old_name = os.path.basename(file_path)
+            if mode == "upper":
+                new_name = old_name.upper()
+            else:
+                new_name = old_name.lower()
+            preview.append((old_name, new_name))
+        
+        self._show_rename_preview_and_confirm(preview, mode, None, None, files, file_ops, filelist, update_callback)
+    
+    def _execute_bulk_rename(self, mode, text, replace_text, files, file_ops, filelist, update_callback):
+        """Execute bulk rename with preview"""
+        preview = []
+        for i, file_path in enumerate(files, 1):
+            old_name = os.path.basename(file_path)
+            name, ext = os.path.splitext(old_name)
+            
+            if mode == "prefix":
+                new_name = text + old_name
+            elif mode == "suffix":
+                new_name = name + text + ext
+            elif mode == "replace":
+                new_name = old_name.replace(text, replace_text)
+            elif mode == "number":
+                new_name = "%s_%03d%s" % (text, i, ext)
+            elif mode == "extension":
+                new_name = name + "." + text
+            elif mode == "remove":
+                new_name = old_name.replace(text, "")
+            else:
+                new_name = old_name
+            
+            preview.append((old_name, new_name))
+        
+        self._show_rename_preview_and_confirm(preview, mode, text, replace_text, files, file_ops, filelist, update_callback)
+    
+    def _show_rename_preview_and_confirm(self, preview, mode, text, replace_text, files, file_ops, filelist, update_callback):
+        """Show preview and confirm bulk rename"""
+        preview_text = "Bulk Rename Preview (%d files):\n\n" % len(files)
+        for old, new in preview[:10]:
+            preview_text += "%s\n  -> %s\n\n" % (old, new)
+        
+        if len(preview) > 10:
+            preview_text += "... and %d more\n\n" % (len(preview) - 10)
+        
+        preview_text += "Proceed with rename?"
+        
+        self.show_confirmation(
+            preview_text,
+            lambda res: self._confirm_bulk_rename(res, mode, text, replace_text, files, file_ops, filelist, update_callback)
+        )
+    
+    def _confirm_bulk_rename(self, confirmed, mode, text, replace_text, files, file_ops, filelist, update_callback):
+        """Confirm and execute bulk rename"""
+        if not confirmed:
+            return
+        
+        success = 0
+        errors = []
+        
+        for i, file_path in enumerate(files, 1):
+            try:
+                old_name = os.path.basename(file_path)
+                name, ext = os.path.splitext(old_name)
+                
+                if mode == "prefix":
+                    new_name = text + old_name
+                elif mode == "suffix":
+                    new_name = name + text + ext
+                elif mode == "replace":
+                    new_name = old_name.replace(text, replace_text)
+                elif mode == "number":
+                    new_name = "%s_%03d%s" % (text, i, ext)
+                elif mode == "extension":
+                    new_name = name + "." + text
+                elif mode == "remove":
+                    new_name = old_name.replace(text, "")
+                elif mode == "upper":
+                    new_name = old_name.upper()
+                elif mode == "lower":
+                    new_name = old_name.lower()
+                else:
+                    new_name = old_name
+                
+                file_ops.rename(file_path, new_name)
+                success += 1
+                
+            except Exception as e:
+                errors.append("%s: %s" % (os.path.basename(file_path), str(e)[:30]))
+        
+        msg = "Renamed: %s files\n" % success
+        if errors:
+            msg += "\nFailed: %d\n" % len(errors)
+            msg += "\n".join(errors[:5])
+            if len(errors) > 5:
+                msg += "\n... and %d more" % (len(errors) - 5)
+        
+        filelist.refresh()
+        update_callback()
         self.show_message(msg, type="info")
+
+    def show_network_browser_dialog(self, filelist, update_callback, network_browser, ftp_client, sftp_client, webdav_client):
+        """Show network browser connection dialog"""
+        choices = [
+            ("Connect to FTP Server", "ftp"),
+            ("Connect to SFTP Server", "sftp"),
+            ("Connect to WebDAV Server", "webdav"),
+            ("Recent Connections", "recent")
+        ]
+        
+        self.show_choice(
+            "Network Browser",
+            choices,
+            lambda choice: self._handle_network_browser_choice(choice, filelist, update_callback, network_browser, ftp_client, sftp_client, webdav_client) if choice else None
+        )
     
-    def show_log_viewer(self):
-        """Show log viewer"""
+    def _handle_network_browser_choice(self, choice, filelist, update_callback, network_browser, ftp_client, sftp_client, webdav_client):
+        """Handle network browser choice"""
+        protocol = choice[1]
+        
+        if protocol == "recent":
+            self.show_message("Recent connections - feature coming soon", type="info")
+            return
+        
+        # Show connection dialog
+        self.show_input(
+            "Enter %s address:\n(e.g., user@host:port)" % protocol.upper(),
+            "",
+            lambda addr: self._connect_network_browser(addr, protocol, filelist, update_callback, network_browser, ftp_client, sftp_client, webdav_client) if addr else None
+        )
+    
+    def _connect_network_browser(self, address, protocol, filelist, update_callback, network_browser, ftp_client, sftp_client, webdav_client):
+        """Connect network browser"""
         try:
-            with open(LOG_FILE, 'r') as f:
-                lines = f.readlines()
-                recent = ''.join(lines[-30:])
-                self.show_message(recent, type="info")
+            # Build network path
+            network_path = "%s://%s/" % (protocol, address)
+            
+            # Test connection by listing root
+            entries = network_browser.list_directory(network_path, ftp_client, sftp_client, webdav_client)
+            
+            # If successful, update file list (this would need FileList modification)
+            self.show_message("Connected to %s\n\nFound %d items\n\nNote: Full dual-pane integration requires FileList modification" % (address, len(entries)), type="info")
+            
         except Exception as e:
-            self.show_message(f"Could not read log: {e}", type="error")
-    
-    # Property for SetupScreen
-    @property
-    def SetupScreen(self):
-        """Get setup screen class"""
-        return PilotFSSetup
+            self.show_message("Connection failed:\n%s" % str(e), type="error")

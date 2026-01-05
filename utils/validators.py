@@ -2,15 +2,16 @@ import os
 import re
 import shlex
 
-def validate_path(path, must_exist=False, must_be_dir=False, must_be_file=False):
+def validate_path(path, must_exist=False, must_be_dir=False, must_be_file=False, is_filename=False):
     """
-    Validate file path
+    Validate file path with enhanced security
     
     Args:
         path: Path to validate
         must_exist: If True, path must exist
         must_be_dir: If True, path must be a directory
         must_be_file: If True, path must be a file
+        is_filename: If True, validate as filename only (no path)
     
     Returns:
         bool: True if path is valid
@@ -18,12 +19,57 @@ def validate_path(path, must_exist=False, must_be_dir=False, must_be_file=False)
     if not path or not isinstance(path, str):
         return False
     
-    # Check for path traversal attempts
-    if '..' in path or path.startswith('/etc/passwd') or path.startswith('/etc/shadow'):
-        return False
+    # SECURITY FIX: Enhanced path traversal protection
+    if is_filename:
+        # For filenames, check invalid characters
+        invalid_chars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|', '\x00']
+        if any(char in path for char in invalid_chars):
+            return False
+        
+        # Check reserved names (Windows compatibility)
+        reserved = ['CON', 'PRN', 'AUX', 'NUL', 'COM1', 'COM2', 'COM3', 'COM4',
+                   'COM5', 'COM6', 'COM7', 'COM8', 'COM9', 'LPT1', 'LPT2',
+                   'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9']
+        name_upper = os.path.splitext(path)[0].upper()
+        if name_upper in reserved:
+            return False
+        
+        return len(path) <= 255
     
+    # For full paths
     # Check for null bytes
     if '\x00' in path:
+        return False
+    
+    # Normalize path and check for directory traversal
+    try:
+        normalized = os.path.normpath(os.path.abspath(path))
+    except (ValueError, OSError):
+        return False
+    
+    # Define allowed base directories
+    allowed_bases = [
+        '/media', '/tmp', '/home', '/var/volatile',
+        '/usr/lib/enigma2/python/Plugins'
+    ]
+    
+    # Check if path starts with allowed base (unless checking system paths)
+    if not path.startswith('/etc/enigma2'):  # Allow Enigma2 config
+        if not any(normalized.startswith(base) for base in allowed_bases):
+            # Additional check: allow if it's under current working directory
+            try:
+                cwd = os.getcwd()
+                if not normalized.startswith(cwd):
+                    return False
+            except:
+                return False
+    
+    # Prevent access to sensitive system files
+    forbidden_paths = [
+        '/etc/passwd', '/etc/shadow', '/etc/sudoers',
+        '/root/.ssh', '/etc/ssh'
+    ]
+    if any(normalized.startswith(forbidden) for forbidden in forbidden_paths):
         return False
     
     # Check if path exists if required
@@ -41,25 +87,15 @@ def validate_path(path, must_exist=False, must_be_dir=False, must_be_file=False)
     return True
 
 def validate_ip(ip_address):
-    """
-    Validate IP address
-    
-    Args:
-        ip_address: IP address to validate
-    
-    Returns:
-        bool: True if IP is valid
-    """
+    """Validate IP address (IPv4)"""
     if not ip_address or not isinstance(ip_address, str):
         return False
     
-    # IPv4 pattern
     ipv4_pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
     
     if not re.match(ipv4_pattern, ip_address):
         return False
     
-    # Check each octet
     parts = ip_address.split('.')
     for part in parts:
         try:
@@ -72,51 +108,25 @@ def validate_ip(ip_address):
     return True
 
 def validate_hostname(hostname):
-    """
-    Validate hostname
-    
-    Args:
-        hostname: Hostname to validate
-    
-    Returns:
-        bool: True if hostname is valid
-    """
+    """Validate hostname"""
     if not hostname or not isinstance(hostname, str):
         return False
     
-    # Basic hostname pattern
     pattern = r'^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$'
     
     return bool(re.match(pattern, hostname)) and len(hostname) <= 255
 
 def validate_url(url):
-    """
-    Validate URL
-    
-    Args:
-        url: URL to validate
-    
-    Returns:
-        bool: True if URL is valid
-    """
+    """Validate URL"""
     if not url or not isinstance(url, str):
         return False
     
-    # Basic URL pattern
     pattern = r'^(https?|ftp|file)://.+'
     
     return bool(re.match(pattern, url))
 
 def validate_port(port):
-    """
-    Validate port number
-    
-    Args:
-        port: Port number to validate
-    
-    Returns:
-        bool: True if port is valid
-    """
+    """Validate port number"""
     try:
         port_num = int(port)
         return 1 <= port_num <= 65535
@@ -153,51 +163,11 @@ def sanitize_string(text, max_length=255, allow_special=False):
     return text.strip()
 
 def validate_filename(filename):
-    """
-    Validate filename
-    
-    Args:
-        filename: Filename to validate
-    
-    Returns:
-        bool: True if filename is valid
-    """
-    if not filename or not isinstance(filename, str):
-        return False
-    
-    # Check for invalid characters
-    invalid_chars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|', '\x00']
-    for char in invalid_chars:
-        if char in filename:
-            return False
-    
-    # Check for reserved names (Windows, but good practice)
-    reserved_names = [
-        'CON', 'PRN', 'AUX', 'NUL',
-        'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
-        'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9'
-    ]
-    
-    name_without_ext = os.path.splitext(filename)[0].upper()
-    if name_without_ext in reserved_names:
-        return False
-    
-    # Check length
-    if len(filename) > 255:
-        return False
-    
-    return True
+    """Validate filename"""
+    return validate_path(filename, is_filename=True)
 
 def validate_email(email):
-    """
-    Validate email address
-    
-    Args:
-        email: Email to validate
-    
-    Returns:
-        bool: True if email is valid
-    """
+    """Validate email address"""
     if not email or not isinstance(email, str):
         return False
     
@@ -205,17 +175,7 @@ def validate_email(email):
     return bool(re.match(pattern, email))
 
 def validate_integer(value, min_value=None, max_value=None):
-    """
-    Validate integer
-    
-    Args:
-        value: Value to validate
-        min_value: Minimum allowed value
-        max_value: Maximum allowed value
-    
-    Returns:
-        bool: True if integer is valid
-    """
+    """Validate integer"""
     try:
         num = int(value)
         
@@ -230,17 +190,7 @@ def validate_integer(value, min_value=None, max_value=None):
         return False
 
 def validate_float(value, min_value=None, max_value=None):
-    """
-    Validate float
-    
-    Args:
-        value: Value to validate
-        min_value: Minimum allowed value
-        max_value: Maximum allowed value
-    
-    Returns:
-        bool: True if float is valid
-    """
+    """Validate float"""
     try:
         num = float(value)
         
@@ -255,27 +205,11 @@ def validate_float(value, min_value=None, max_value=None):
         return False
 
 def escape_shell_argument(arg):
-    """
-    Escape shell argument to prevent injection
-    
-    Args:
-        arg: Argument to escape
-    
-    Returns:
-        str: Escaped argument
-    """
+    """Escape shell argument to prevent injection"""
     return shlex.quote(str(arg))
 
 def validate_json(text):
-    """
-    Validate JSON string
-    
-    Args:
-        text: JSON string to validate
-    
-    Returns:
-        bool: True if JSON is valid
-    """
+    """Validate JSON string"""
     import json
     
     try:
@@ -285,15 +219,7 @@ def validate_json(text):
         return False
 
 def validate_regex(pattern):
-    """
-    Validate regex pattern
-    
-    Args:
-        pattern: Regex pattern to validate
-    
-    Returns:
-        bool: True if regex is valid
-    """
+    """Validate regex pattern"""
     try:
         re.compile(pattern)
         return True

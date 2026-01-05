@@ -1,6 +1,4 @@
-from .main_screen import PilotFSMain
-from .setup_screen import PilotFSSetup
-from .context_menu import ContextMenuHandler
-from .dialogs import Dialogs
+# UI module
+# Import components on demand to avoid circular dependencies
 
-__all__ = ['PilotFSMain', 'PilotFSSetup', 'ContextMenuHandler', 'Dialogs']
+__all__ = []
