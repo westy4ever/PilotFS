@@ -45,6 +45,17 @@ class Dialogs:
             self.session.openWithCallback(callback, MessageBox, text, MessageBox.TYPE_YESNO)
         except Exception as e:
             logger.error(f"Error showing confirmation: {e}")
+        # Media exit confirmation - ADD THIS FUNCTION
+    def show_media_exit_confirmation(self, session, callback):
+        """Show exit confirmation for media viewers"""
+        try:
+            session.openWithCallback(callback, MessageBox, 
+                                   "Exit image viewer?", 
+                                   MessageBox.TYPE_YESNO)
+        except Exception as e:
+            logger.error(f"Error showing media exit confirmation: {e}")
+            # Fallback: execute callback with True (exit)
+            callback(True)        
     
     def show_input(self, title, text="", callback=None):
         """Show input dialog"""
@@ -457,22 +468,30 @@ class Dialogs:
             self.show_message("Cannot preview file: " + str(e), type="error")
     
     def _preview_image(self, file_path, file_ops):
-        """Preview image file"""
+        """Preview image file - UPDATED to use ImageViewer"""
         try:
+            # Try to use advanced ImageViewer
+            try:
+                from .image_viewer import ImageViewer
+                self.session.open(ImageViewer, file_path)
+                return
+            except ImportError as e:
+                logger.warning("ImageViewer not available: %s" % str(e))
+            
+            # Fallback to info display
             info = file_ops.get_file_info(file_path)
             
             preview = "Image Preview\n\n"
-            preview += "File: " + info['name'] + "\n"
-            preview += "Size: " + info['size_formatted'] + "\n"
-            preview += "Type: " + os.path.splitext(file_path)[1].upper() + "\n"
-            preview += "Modified: " + info['modified'].strftime('%Y-%m-%d %H:%M') + "\n\n"
-            preview += "Image preview requires media viewer.\n"
-            preview += "Use file browser to open image."
+            preview += "File: %s\n" % info['name']
+            preview += "Size: %s\n" % info['size_formatted']
+            preview += "Type: %s\n" % os.path.splitext(file_path)[1].upper()
+            preview += "Modified: %s\n\n" % info['modified'].strftime('%Y-%m-%d %H:%M')
+            preview += "Advanced viewer not available."
             
             self.show_message(preview, type="info")
         except Exception as e:
-            logger.error(f"Error previewing image: {e}")
-            self.show_message("Cannot preview image: " + str(e), type="error")
+            logger.error("Error previewing image: %s" % str(e))
+            self.show_message("Cannot preview image: %s" % str(e), type="error")
     
     def preview_image(self, file_path, file_ops):
         """Preview image (public wrapper)"""
