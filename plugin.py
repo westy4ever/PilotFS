@@ -151,7 +151,7 @@ def Plugins(**kwargs):
         try:
             import os
             if os.path.exists(location):
-                icon_path = location.replace("/usr/lib/enigma2/python/Plugins/Extensions/PilotFS/", "")
+                icon_path = location
                 logger.debug("Found icon at: %s" % location)
                 break
         except:
@@ -166,7 +166,7 @@ def Plugins(**kwargs):
             name="PilotFS Platinum v6.1",
             description=description,
             where=PluginDescriptor.WHERE_PLUGINMENU,
-            icon=icon_path if icon_path else None,  # None = use default
+            icon=icon_path,
             fnc=main
         )
     )

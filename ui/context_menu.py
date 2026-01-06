@@ -352,21 +352,16 @@ class ContextMenuHandler:
             self.dialogs.show_message(f"Tools menu error: {e}", type="error")
     
     def tools_callback(self, answer):
-        """Handle tools menu selection"""
+        """Handle tools menu selection - FIXED: No callback for settings to prevent modal crash"""
         if not answer or answer[1] is None:
             return
         
         mode = answer[1]
         
         try:
-            # Store that we came from tools menu
-            self.from_tools_menu = True
-            
             if mode == "cfg":
-                self.main.session.openWithCallback(
-                    self.return_to_tools_menu,
-                    self.main.dialogs.SetupScreen
-                )
+                # FIXED: Open settings directly without callback to prevent modal crash
+                self.main.session.open(self.main.dialogs.SetupScreen)
             elif mode == "bookmarks":
                 self.main.dialogs.show_bookmark_manager(self.main.bookmarks, self.main.config, 
                                                        self.main.active_pane, self.main.update_ui)
@@ -447,16 +442,6 @@ class ContextMenuHandler:
             logger.error(f"Error in tools callback: {e}")
             self.dialogs.show_message(f"Tools error: {e}", type="error")
     
-    def return_to_tools_menu(self, *args):
-        """Return to tools menu after sub-operation"""
-        if hasattr(self, 'from_tools_menu') and self.from_tools_menu:
-            self.from_tools_menu = False
-            # Show tools menu again
-            try:
-                self.show_tools_menu()
-            except Exception as e:
-                logger.error(f"Error returning to tools menu: {e}")
-    
     def show_cloud_sync_menu(self):
         """Show cloud sync submenu with actual functionality"""
         try:
@@ -482,10 +467,12 @@ class ContextMenuHandler:
     def handle_cloud_menu(self, choice):
         """Handle cloud sync menu"""
         if not choice or choice[1] == "back":
+            # FIXED: Don't recursively call show_tools_menu to prevent stack issues
             try:
-                self.show_tools_menu()
+                # Return to main screen instead of recursively showing tools
+                self.main.dialogs.show_message("Returned from cloud sync menu", type="info", timeout=2)
             except Exception as e:
-                logger.error(f"Error returning to tools menu from cloud: {e}")
+                logger.error(f"Error returning from cloud menu: {e}")
             return
         
         action = choice[1]
@@ -527,10 +514,12 @@ class ContextMenuHandler:
     def handle_repair_menu(self, choice):
         """Handle repair menu"""
         if not choice or choice[1] == "back":
+            # FIXED: Don't recursively call show_tools_menu to prevent stack issues
             try:
-                self.show_tools_menu()
+                # Return to main screen instead of recursively showing tools
+                self.main.dialogs.show_message("Returned from repair menu", type="info", timeout=2)
             except Exception as e:
-                logger.error(f"Error returning to tools menu from repair: {e}")
+                logger.error(f"Error returning from repair menu: {e}")
             return
         
         action = choice[1]

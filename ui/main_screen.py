@@ -5,7 +5,7 @@ from Components.ActionMap import ActionMap
 from Components.FileList import FileList
 from Components.Label import Label
 from Components.ProgressBar import ProgressBar
-from enigma import getDesktop, eTimer
+from enigma import getDesktop, eTimer, eLabel, gFont, gRGB, RT_HALIGN_LEFT, RT_VALIGN_CENTER
 import threading
 import os
 import time
@@ -31,7 +31,7 @@ class PilotFSMain(Screen):
         # Get screen dimensions
         w, h = getDesktop(0).size().width(), getDesktop(0).size().height()
         pane_width = (w - 60) // 2
-        pane_height = h - 300  # Increased spacing to prevent overlap
+        pane_height = h - 250  # Adjusted for cleaner layout
         
         # Initialize core components
         self.config = PilotFSConfig()
@@ -63,6 +63,7 @@ class PilotFSMain(Screen):
         button_y = h - 60
         label_y = h - 45
         
+        # CHANGED: Selection color from #FF0000 (red) to #FF5555 (softer red) for better visibility
         self.skin = f"""
         <screen name="PilotFSMain" position="0,0" size="{w},{h}" backgroundColor="#1a1a1a" flags="wfNoBorder">
             <eLabel position="0,0" size="{w},60" backgroundColor="#0055aa" />
@@ -85,22 +86,20 @@ class PilotFSMain(Screen):
                     valign="center" backgroundColor="#333333" 
                     foregroundColor="#aaaaaa" borderWidth="0" borderColor="#ffff00" />
             
-            <!-- File Lists -->
-            <widget name="left_pane" position="25,125" size="{pane_width},{pane_height}" 
-                    itemHeight="40" selectionColor="#FF0000" scrollbarMode="showOnDemand" />
-            <widget name="right_pane" position="{pane_width + 45},125" size="{pane_width},{pane_height}" 
-                    itemHeight="40" selectionColor="#FF0000" scrollbarMode="showOnDemand" />
+            <!-- File Lists with CHANGED selection color -->
+            <widget name="left_pane" position="25,110" size="{pane_width},{pane_height}" 
+                    itemHeight="40" selectionColor="#FF5555" scrollbarMode="showOnDemand" />
+            <widget name="right_pane" position="{pane_width + 45},110" size="{pane_width},{pane_height}" 
+                    itemHeight="40" selectionColor="#FF5555" scrollbarMode="showOnDemand" />
             
             <!-- Info Panels -->
-            <widget name="progress_bar" position="20,{h-170}" size="{w-40},8" 
+            <widget name="progress_bar" position="20,{h-150}" size="{w-40},8" 
                     backgroundColor="#333333" foregroundColor="#00aaff" 
                     borderWidth="2" borderColor="#aaaaaa" />
-            <widget name="info_panel" position="20,{h-155}" size="{w-40},30" 
+            <widget name="info_panel" position="20,{h-135}" size="{w-40},30" 
                     font="Regular;20" foregroundColor="#ff8800" transparent="1" />
-            <widget name="status_bar" position="20,{h-120}" size="{w-40},35" 
+            <widget name="status_bar" position="20,{h-100}" size="{w-40},35" 
                     font="Regular;22" foregroundColor="#ffffff" transparent="1" />
-            <widget name="path_label" position="20,{h-195}" size="{w-40},28" 
-                    font="Regular;24" foregroundColor="#cccccc" transparent="1" noWrap="1" />
             
             <!-- Footer -->
             <eLabel position="0,{h-60}" size="{w},60" backgroundColor="#000000" />
@@ -126,6 +125,7 @@ class PilotFSMain(Screen):
         left_path = self.config.plugins.pilotfs.left_path.value
         right_path = self.config.plugins.pilotfs.right_path.value
         
+        # Create FileLists with proper color handling
         self["left_pane"] = FileList(left_path, showDirectories=True, showFiles=True)
         self["right_pane"] = FileList(right_path, showDirectories=True, showFiles=True)
         self["left_pane"].useSelection = True
@@ -133,7 +133,6 @@ class PilotFSMain(Screen):
         
         self["progress_bar"] = ProgressBar()
         self["status_bar"] = Label("Loading...")
-        self["path_label"] = Label("")
         self["info_panel"] = Label("")
         self["left_banner"] = Label("◀ LEFT PANE")
         self["right_banner"] = Label("RIGHT PANE ▶")
@@ -177,6 +176,9 @@ class PilotFSMain(Screen):
         
         # Preview state
         self.preview_in_progress = False
+        
+        # Track marked files for color changes
+        self.marked_files = set()
     
     def setup_actions(self):
         """Setup key mappings"""
@@ -232,11 +234,10 @@ class PilotFSMain(Screen):
         """Update user interface"""
         self.update_banners()
         self.update_status_bar()
-        self.update_path_label()
         self.update_info_panel()
     
     def update_banners(self):
-        """Update pane banners"""
+        """Update pane banners - shows full path information"""
         is_left_active = (self.active_pane == self["left_pane"])
         is_right_active = (self.active_pane == self["right_pane"])
         
@@ -245,15 +246,20 @@ class PilotFSMain(Screen):
             left_dir = self["left_pane"].getCurrentDirectory()
             right_dir = self["right_pane"].getCurrentDirectory()
             
-            # Shorten if too long
-            if len(left_dir) > 45:
-                left_dir = "..." + left_dir[-42:]
-            if len(right_dir) > 45:
-                right_dir = "..." + right_dir[-42:]
-            
             # Build text with indicators
-            left_text = "◀ LEFT: " + left_dir if is_left_active else "LEFT: " + left_dir
-            right_text = "RIGHT: " + right_dir + " ▶" if is_right_active else "RIGHT: " + right_dir
+            if is_left_active:
+                left_text = "◀ LEFT: " + left_dir
+                right_text = "RIGHT: " + right_dir
+            else:
+                left_text = "LEFT: " + left_dir
+                right_text = "RIGHT: " + right_dir + " ▶"
+            
+            # Shorten if too long
+            if len(left_text) > 50:
+                left_text = left_text[:47] + "..."
+            if len(right_text) > 50:
+                right_text = right_text[:47] + "..."
+                
         except Exception as e:
             logger.error(f"Error getting directory paths: {e}")
             left_text = "◀ LEFT" if is_left_active else "LEFT"
@@ -264,26 +270,38 @@ class PilotFSMain(Screen):
         
         # Update colors
         try:
-            from enigma import gFont
-            ACTIVE_COLOR = 16776960   # Yellow
-            INACTIVE_COLOR = 11184810  # Gray
+            from enigma import gRGB
+            
+            ACTIVE_COLOR = gRGB(0xffff00)  # Yellow (hex: FFFF00)
+            INACTIVE_COLOR = gRGB(0xaaaaaa)  # Gray (hex: AAAAAA)
             
             left_instance = self["left_banner"].instance
             right_instance = self["right_banner"].instance
             
             if left_instance:
                 left_instance.setForegroundColor(ACTIVE_COLOR if is_left_active else INACTIVE_COLOR)
-                left_instance.setFont(gFont("Regular", 22 if is_left_active else 19))
             
             if right_instance:
                 right_instance.setForegroundColor(ACTIVE_COLOR if is_right_active else INACTIVE_COLOR)
-                right_instance.setFont(gFont("Regular", 22 if is_right_active else 19))
                 
         except Exception as e:
             logger.error(f"Banner styling error: {e}")
+            # Fallback to simpler method
+            try:
+                if is_left_active:
+                    self["left_banner"].instance.setForegroundColor(0xffff00)
+                else:
+                    self["left_banner"].instance.setForegroundColor(0xaaaaaa)
+                
+                if is_right_active:
+                    self["right_banner"].instance.setForegroundColor(0xffff00)
+                else:
+                    self["right_banner"].instance.setForegroundColor(0xaaaaaa)
+            except Exception as e2:
+                logger.error(f"Fallback banner styling also failed: {e2}")
     
     def update_status_bar(self):
-        """Update status bar text"""
+        """Update status bar text - PATH COMPLETELY REMOVED"""
         try:
             marked = [x for x in self.active_pane.list if x[0][3]]
         except Exception:
@@ -298,26 +316,29 @@ class PilotFSMain(Screen):
             total_size = sum(self.file_ops.get_file_size(x[0][0]) for x in marked)
             text = f"✓ SELECTED: {len(marked)} items ({format_size(total_size)}) - Press 0 for menu"
         else:
+            # PATH COMPLETELY REMOVED - Shows only navigation help
             text = "Arrows Navigate | RED:delete  GREEN:rename  YELLOW:select  BLUE:copy/move"
         
         self["status_bar"].setText(text)
     
-    def update_path_label(self):
-        """Update path label"""
-        try:
-            current_dir = self.active_pane.getCurrentDirectory()
-            self["path_label"].setText(f"📁 {current_dir}")
-        except Exception as e:
-            logger.error(f"Error updating path label: {e}")
-    
     def update_info_panel(self):
-        """Update info panel with current file details - OPTIMIZED"""
+        """Update info panel with current file details"""
         try:
             sel = self.active_pane.getSelection()
             if sel and sel[0]:
                 path = sel[0]
                 name = os.path.basename(path)
                 icon = get_file_icon(path)
+                
+                # Check if file is marked
+                try:
+                    is_marked = False
+                    for item in self.active_pane.list:
+                        if item[0][0] == path and item[0][3]:  # Marked
+                            is_marked = True
+                            break
+                except:
+                    is_marked = False
                 
                 # Only get size for files, not directories (too slow)
                 if os.path.isfile(path):
@@ -329,7 +350,12 @@ class PilotFSMain(Screen):
                 else:
                     size_str = "DIR"
                 
-                text = f"{icon} {name} | {size_str}"
+                # Show in RED if marked
+                if is_marked:
+                    text = f"🔴 {icon} {name} | {size_str}"
+                else:
+                    text = f"{icon} {name} | {size_str}"
+                    
                 self["info_panel"].setText(text)
                 return
         except Exception as e:
@@ -360,7 +386,6 @@ class PilotFSMain(Screen):
         """Handle OK button press - SIMPLE NAVIGATION"""
         # Long press disabled - always navigate immediately
         self.execute_ok_navigation()
-    
 
 
     def execute_ok_navigation(self):
@@ -457,10 +482,20 @@ class PilotFSMain(Screen):
     
     # File Operations
     def toggle_selection(self):
-        """Toggle file selection"""
+        """Toggle file selection - UPDATED to show red text in info panel"""
         if not self.operation_in_progress:
             try:
+                # Toggle selection
                 self.active_pane.toggleSelection()
+                
+                # Update marked files tracking
+                self.marked_files.clear()
+                for item in self.active_pane.list:
+                    if item[0][3]:  # Marked
+                        self.marked_files.add(item[0][0])
+                
+                # Update UI to show red text for marked files
+                self.update_info_panel()
                 self.update_ui()
             except Exception as e:
                 logger.error(f"Error toggling selection: {e}")
@@ -902,13 +937,44 @@ class PilotFSMain(Screen):
         self.dialogs.show_message(legend, type="info")
     
     def show_storage_selector(self):
-        """Show storage device selector"""
+        """Show storage device selector - FIXED to work properly"""
         if self.operation_in_progress:
             self.dialogs.show_message("Please wait for current operation to complete!", type="info")
             return
         
         try:
-            self.dialogs.show_storage_selector(self.active_pane.changeDir, self.update_ui)
+            # Define callback that properly navigates to selected storage
+            def storage_selected_callback(selected_path):
+                if selected_path:
+                    try:
+                        logger.info(f"Storage selector: Navigating to {selected_path}")
+                        
+                        # Check if path exists and is accessible
+                        if os.path.isdir(selected_path):
+                            # DIRECT NAVIGATION - This is the fix!
+                            # Change to the selected storage directory
+                            self.active_pane.changeDir(selected_path)
+                            self.update_ui()
+                            logger.info(f"Successfully navigated to: {selected_path}")
+                        else:
+                            logger.warning(f"Path not found: {selected_path}")
+                            self.dialogs.show_message(
+                                f"Storage not found:\n{selected_path}",
+                                type="error"
+                            )
+                    except Exception as e:
+                        logger.error(f"Error navigating to storage: {e}")
+                        self.dialogs.show_message(
+                            f"Navigation error:\n{str(e)[:50]}",
+                            type="error"
+                        )
+            
+            # Open storage selector with fixed callback
+            self.dialogs.show_storage_selector(
+                storage_selected_callback,
+                self.update_ui
+            )
+            
         except Exception as e:
             logger.error(f"Error showing storage selector: {e}")
             self.dialogs.show_message(f"Storage selector error: {e}", type="error")

@@ -6,6 +6,7 @@ import subprocess
 import threading
 import hashlib
 from datetime import datetime
+import glob
 
 from ..ui.setup_screen import PilotFSSetup
 from ..utils.formatters import format_size, get_file_icon
@@ -557,23 +558,27 @@ class Dialogs:
         
         threading.Thread(target=analyze_thread, daemon=True).start()
     
-    # Storage selector
+    # Storage selector - FIXED VERSION
     def show_storage_selector(self, change_dir_callback, update_callback):
-        """Show storage selector"""
+        """Show storage selector - FIXED with dynamic detection"""
         try:
             choices = []
             
-            storage_locations = [
-                ("Internal Hard Disk", "/media/hdd"),
-                ("USB Storage", "/media/usb"),
-                ("USB 1", "/media/usb1"),
-                ("USB 2", "/media/usb2"),
-                ("Network Mounts", "/media/net"),
-                ("Root Filesystem", "/"),
-                ("System Temp", "/tmp"),
-                ("Flash Memory", "/media/mmc"),
-                ("SD Card", "/media/sdcard"),
-            ]
+            # Dynamic storage detection
+            storage_locations = self._detect_storage_devices()
+            
+            if not storage_locations:
+                storage_locations = [
+                    ("Internal Hard Disk", "/media/hdd"),
+                    ("USB Storage", "/media/usb"),
+                    ("USB 1", "/media/usb1"),
+                    ("USB 2", "/media/usb2"),
+                    ("Network Mounts", "/media/net"),
+                    ("Root Filesystem", "/"),
+                    ("System Temp", "/tmp"),
+                    ("Flash Memory", "/media/mmc"),
+                    ("SD Card", "/media/sdcard"),
+                ]
             
             for label, path in storage_locations:
                 if os.path.isdir(path):
@@ -597,15 +602,77 @@ class Dialogs:
             logger.error(f"Error showing storage selector: {e}")
             self.show_message(f"Storage selector error: {e}", type="error")
     
+    def _detect_storage_devices(self):
+        """Dynamically detect storage devices"""
+        storage_list = []
+        
+        try:
+            # Check common mount points
+            mount_patterns = [
+                ("/media/*", "Storage"),
+                ("/media/hdd/*", "HDD"),
+                ("/media/usb*", "USB"),
+                ("/media/net/*", "Network"),
+                ("/media/sd*", "SD Card"),
+                ("/media/mmc*", "MMC Card"),
+                ("/mnt/*", "Mount"),
+                ("/autofs/*", "AutoFS"),
+            ]
+            
+            for pattern, label_prefix in mount_patterns:
+                try:
+                    mount_points = glob.glob(pattern)
+                    for mp in mount_points:
+                        if os.path.isdir(mp) and os.access(mp, os.R_OK):
+                            # Check if it's a mount point
+                            try:
+                                with open('/proc/mounts', 'r') as f:
+                                    mounts = f.read()
+                                    if mp in mounts or os.path.ismount(mp):
+                                        dev_name = os.path.basename(mp)
+                                        storage_list.append((f"{label_prefix}: {dev_name}", mp))
+                            except:
+                                # Fallback: just use directory name
+                                dev_name = os.path.basename(mp)
+                                storage_list.append((f"{label_prefix}: {dev_name}", mp))
+                except Exception as e:
+                    logger.debug(f"Error scanning {pattern}: {e}")
+            
+            # Add root filesystem
+            storage_list.append(("Root Filesystem", "/"))
+            
+            # Add common locations
+            common_dirs = [
+                ("Home Directory", os.path.expanduser("~")),
+                ("Temp Directory", "/tmp"),
+                ("System Logs", "/var/log"),
+                ("Configuration", "/etc"),
+            ]
+            
+            for label, path in common_dirs:
+                if os.path.isdir(path):
+                    storage_list.append((label, path))
+            
+        except Exception as e:
+            logger.error(f"Error detecting storage devices: {e}")
+        
+        return storage_list
+    
     def _select_storage(self, choice, change_dir_callback, update_callback):
-        """Select storage location"""
+        """Select storage location - FIXED to properly navigate"""
         try:
             path = choice[1]
-            if os.path.isdir(path):
+            logger.info(f"Attempting to navigate to storage: {path}")
+            
+            if os.path.isdir(path) and os.access(path, os.R_OK):
+                # Call the change_dir_callback to navigate
                 change_dir_callback(path)
+                # Call update_callback to refresh UI
                 update_callback()
+                logger.info(f"Successfully navigated to: {path}")
             else:
-                self.show_message("Storage not accessible: " + path, type="error")
+                logger.warning(f"Storage not accessible: {path}")
+                self.show_message(f"Storage not accessible:\n{path}", type="error")
         except Exception as e:
             logger.error(f"Error selecting storage: {e}")
             self.show_message(f"Storage selection error: {e}", type="error")

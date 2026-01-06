@@ -3,7 +3,7 @@ from Screens.MessageBox import MessageBox
 from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.ConfigList import ConfigListScreen
-from Components.config import config, getConfigListEntry
+from Components.config import config, getConfigListEntry, ConfigNothing
 from enigma import getDesktop
 
 from ..core.config import PilotFSConfig
@@ -49,34 +49,28 @@ class PilotFSSetup(ConfigListScreen, Screen):
             <eLabel position="0,{button_y-10}" size="{panel_w},2" backgroundColor="#30363d" />
             <eLabel position="0,{button_y-8}" size="{panel_w},80" backgroundColor="#010409" />
             
-            <!-- Color-coded Button Backgrounds -->
+            <!-- Color-coded Button Backgrounds - Only 3 buttons now -->
             <eLabel position="20,{button_y}" size="180,55" backgroundColor="#7d1818" />
-            <eLabel position="220,{button_y}" size="180,55" backgroundColor="#1a6b34" />
-            <eLabel position="420,{button_y}" size="180,55" backgroundColor="#9e6a03" />
-            <eLabel position="620,{button_y}" size="180,55" backgroundColor="#0969da" />
+            <eLabel position="220,{button_y}" size="180,55" backgroundColor="#9e6a03" />
+            <eLabel position="420,{button_y}" size="180,55" backgroundColor="#0969da" />
             
-            <!-- Button Labels with Icons -->
+            <!-- Button Labels with Icons - Only 3 buttons now -->
             <widget name="key_red" position="25,{button_y+5}" size="170,45" zPosition="1" 
                     font="Regular;22" halign="center" valign="center" 
                     transparent="1" foregroundColor="#ffffff" 
                     shadowColor="#000000" shadowOffset="-1,-1" />
-            <widget name="key_green" position="225,{button_y+5}" size="170,45" zPosition="1" 
+            <widget name="key_yellow" position="225,{button_y+5}" size="170,45" zPosition="1" 
                     font="Regular;22" halign="center" valign="center" 
                     transparent="1" foregroundColor="#ffffff" 
                     shadowColor="#000000" shadowOffset="-1,-1" />
-            <widget name="key_yellow" position="425,{button_y+5}" size="170,45" zPosition="1" 
-                    font="Regular;22" halign="center" valign="center" 
-                    transparent="1" foregroundColor="#ffffff" 
-                    shadowColor="#000000" shadowOffset="-1,-1" />
-            <widget name="key_blue" position="625,{button_y+5}" size="170,45" zPosition="1" 
+            <widget name="key_blue" position="425,{button_y+5}" size="170,45" zPosition="1" 
                     font="Regular;22" halign="center" valign="center" 
                     transparent="1" foregroundColor="#ffffff" 
                     shadowColor="#000000" shadowOffset="-1,-1" />
         </screen>"""
         
-        # Initialize labels
+        # Initialize labels - Only 3 buttons now
         self["key_red"] = Label("Cancel")
-        self["key_green"] = Label("OK")
         self["key_yellow"] = Label("Defaults")
         self["key_blue"] = Label("Save")
         
@@ -87,14 +81,14 @@ class PilotFSSetup(ConfigListScreen, Screen):
         self.config_manager = PilotFSConfig()
         self.setup_title = "PilotFS Configuration"
         
-        # Setup actions
+        # Setup actions - Only Cancel, Defaults, and Save now
+        # IMPORTANT: Removed "ok": self.key_save to prevent modal crash
         self["actions"] = ActionMap(["SetupActions", "ColorActions"], {
-            "green": self.key_save,
             "red": self.key_cancel,
             "yellow": self.load_defaults,
             "blue": self.key_save,
             "cancel": self.key_cancel,
-            "ok": self.key_save,
+            # REMOVED: "ok": self.key_save  # This causes modal crash!
         }, -2)
         
         # Initialize config list
@@ -105,7 +99,7 @@ class PilotFSSetup(ConfigListScreen, Screen):
         self.list = []
         
         # === GENERAL SETTINGS ===
-        self.list.append(getConfigListEntry("══════ General Settings ══════", config.plugins.pilotfs.left_path))  # Dummy entry for header
+        self.list.append(getConfigListEntry("══════ General Settings ══════", ConfigNothing()))
         
         self.list.append(getConfigListEntry("Default Left Path:", 
                      config.plugins.pilotfs.left_path))
@@ -121,7 +115,7 @@ class PilotFSSetup(ConfigListScreen, Screen):
                      config.plugins.pilotfs.right_sort_mode))
         
         # === CONTEXT MENU SETTINGS ===
-        self.list.append(getConfigListEntry("══════ Context Menu Settings ══════", config.plugins.pilotfs.left_path))  # Dummy entry
+        self.list.append(getConfigListEntry("══════ Context Menu Settings ══════", ConfigNothing()))
         
         self.list.append(getConfigListEntry("Enable Smart Context Menus:", 
                      config.plugins.pilotfs.enable_smart_context))
@@ -131,7 +125,7 @@ class PilotFSSetup(ConfigListScreen, Screen):
                      config.plugins.pilotfs.group_tools_menu))
         
         # === FILE OPERATIONS ===
-        self.list.append(getConfigListEntry("══════ File Operations ══════", config.plugins.pilotfs.left_path))  # Dummy entry
+        self.list.append(getConfigListEntry("══════ File Operations ══════", ConfigNothing()))
         
         self.list.append(getConfigListEntry("Enable Trash:", 
                      config.plugins.pilotfs.trash_enabled))
@@ -141,7 +135,7 @@ class PilotFSSetup(ConfigListScreen, Screen):
                      config.plugins.pilotfs.preview_size))
         
         # === EXIT BEHAVIOR ===
-        self.list.append(getConfigListEntry("══════ Exit Behavior ══════", config.plugins.pilotfs.left_path))  # Dummy entry
+        self.list.append(getConfigListEntry("══════ Exit Behavior ══════", ConfigNothing()))
         
         self.list.append(getConfigListEntry("Save Left Path on Exit:", 
                      config.plugins.pilotfs.save_left_on_exit))
@@ -149,7 +143,7 @@ class PilotFSSetup(ConfigListScreen, Screen):
                      config.plugins.pilotfs.save_right_on_exit))
         
         # === MEDIA PLAYER ===
-        self.list.append(getConfigListEntry("══════ Media Player ══════", config.plugins.pilotfs.left_path))  # Dummy entry
+        self.list.append(getConfigListEntry("══════ Media Player ══════", ConfigNothing()))
         
         self.list.append(getConfigListEntry("Use Internal Player:", 
                      config.plugins.pilotfs.use_internal_player))
@@ -157,7 +151,7 @@ class PilotFSSetup(ConfigListScreen, Screen):
                      config.plugins.pilotfs.fallback_to_external))
         
         # === REMOTE ACCESS ===
-        self.list.append(getConfigListEntry("══════ Remote Access ══════", config.plugins.pilotfs.left_path))  # Dummy entry
+        self.list.append(getConfigListEntry("══════ Remote Access ══════", ConfigNothing()))
         
         self.list.append(getConfigListEntry("Remote IP for Mount:", 
                      config.plugins.pilotfs.remote_ip))
@@ -195,12 +189,14 @@ class PilotFSSetup(ConfigListScreen, Screen):
         self["config"].l.setList(self.list)
     
     def load_defaults(self):
-        """Load default configuration"""
+        """Load default configuration - FIXED: Don't use session.openWithCallback which causes modal crash"""
+        # Create message box directly
         self.session.openWithCallback(
             self.confirm_defaults,
             MessageBox,
             "Reset all settings to defaults?",
-            MessageBox.TYPE_YESNO
+            MessageBox.TYPE_YESNO,
+            timeout=0
         )
     
     def confirm_defaults(self, result):
@@ -249,14 +245,10 @@ class PilotFSSetup(ConfigListScreen, Screen):
             config.plugins.pilotfs.webdav_user.value = ""
             config.plugins.pilotfs.webdav_pass.value = ""
             
-            # Save all
-            for item in self.list:
-                if hasattr(item[1], 'save'):
-                    item[1].save()
-            
             # Reinitialize the list
             self.init_config_list()
             
+            # Show success message
             self.session.open(
                 MessageBox,
                 "Defaults loaded successfully!",
@@ -319,6 +311,13 @@ class PilotFSSetup(ConfigListScreen, Screen):
             ConfigListScreen.keyRight(self)
         except Exception as e:
             logger.error(f"Error in keyRight: {e}")
+    
+    def keyOK(self):
+        """Handle OK key - DO NOTHING to prevent modal crash"""
+        # This method is intentionally empty to prevent the modal crash
+        # The OK key should not trigger any action in the settings screen
+        # Users should use the Blue (Save) button instead
+        pass
     
     def update_help_text(self):
         """Update help text based on selected item"""
