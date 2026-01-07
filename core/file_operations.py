@@ -398,3 +398,25 @@ class FileOperations:
             
         except Exception as e:
             raise FileOperationError(f"Restore from trash failed: {e}")
+    
+    # New method for compatibility with updated main_screen.py
+    def can_play_file(self, path):
+        """Check if file can be played - for compatibility with main_screen.py"""
+        try:
+            if not os.path.exists(path):
+                return False
+            
+            # Check file size
+            try:
+                size = os.path.getsize(path)
+                if size == 0:
+                    return False
+            except:
+                return False
+            
+            # Check extension
+            ext = os.path.splitext(path)[1].lower()
+            supported = ['.mp4', '.mkv', '.avi', '.ts', '.m2ts', '.mp3', '.flac', '.wav', '.aac', '.ogg', '.m4a']
+            return ext in supported
+        except:
+            return False

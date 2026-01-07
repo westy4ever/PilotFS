@@ -57,7 +57,6 @@ class PilotFSMain(Screen):
         # Start
         self.onLayoutFinish.append(self.startup)
 
-
     def setup_ui(self, w, h, pane_width, pane_height):
         """Setup user interface"""
         button_y = h - 60
@@ -137,7 +136,7 @@ class PilotFSMain(Screen):
         self["left_banner"] = Label("◀ LEFT PANE")
         self["right_banner"] = Label("RIGHT PANE ▶")
         self["help_text"] = Label("OK:Navigate(hold:Menu) 0:Menu YEL:Select MENU:Tools")
-    
+
     def init_state(self):
         """Initialize application state"""
         # Operation state
@@ -179,7 +178,7 @@ class PilotFSMain(Screen):
         
         # Track marked files for color changes
         self.marked_files = set()
-    
+
     def setup_actions(self):
         """Setup key mappings"""
         self["actions"] = ActionMap([
@@ -216,10 +215,24 @@ class PilotFSMain(Screen):
             "channelUp": self.next_sort,
             "channelDown": self.prev_sort,
             "audio": self.show_storage_selector,
+            "pageUp": lambda: self.page_up(),
+            "pageDown": lambda: self.page_down(),
+            "home": lambda: self.go_home(),
+            "end": lambda: self.go_end(),
         }, -1)
-    
+
     def startup(self):
         """Startup initialization"""
+        # Show loading message
+        self["status_bar"].setText("Initializing...")
+        
+        # Validate config first
+        if not self.validate_config():
+            self.dialogs.show_message(
+                "Configuration issues detected!\n\nUsing default paths.",
+                type="warning"
+            )
+        
         self.check_dependencies()
         self.update_ui()
         self.update_help_text()
@@ -228,14 +241,34 @@ class PilotFSMain(Screen):
             self.apply_show_dirs_first()
         
         logger.info("PilotFS started successfully")
-    
+        self["status_bar"].setText("Ready")
+
+    def validate_config(self):
+        """Validate configuration"""
+        issues = []
+        
+        # Check paths exist
+        left_path = self.config.plugins.pilotfs.left_path.value
+        if not os.path.isdir(left_path):
+            issues.append(f"Left path not found: {left_path}")
+        
+        right_path = self.config.plugins.pilotfs.right_path.value
+        if not os.path.isdir(right_path):
+            issues.append(f"Right path not found: {right_path}")
+        
+        if issues:
+            logger.warning(f"Config issues: {issues}")
+            return False
+        
+        return True
+
     # UI Update Methods
     def update_ui(self):
         """Update user interface"""
         self.update_banners()
         self.update_status_bar()
         self.update_info_panel()
-    
+
     def update_banners(self):
         """Update pane banners - shows full path information"""
         is_left_active = (self.active_pane == self["left_pane"])
@@ -299,7 +332,7 @@ class PilotFSMain(Screen):
                     self["right_banner"].instance.setForegroundColor(0xaaaaaa)
             except Exception as e2:
                 logger.error(f"Fallback banner styling also failed: {e2}")
-    
+
     def update_status_bar(self):
         """Update status bar text - PATH COMPLETELY REMOVED"""
         try:
@@ -320,7 +353,7 @@ class PilotFSMain(Screen):
             text = "Arrows Navigate | RED:delete  GREEN:rename  YELLOW:select  BLUE:copy/move"
         
         self["status_bar"].setText(text)
-    
+
     def update_info_panel(self):
         """Update info panel with current file details"""
         try:
@@ -372,7 +405,7 @@ class PilotFSMain(Screen):
             self.update_ui()
         except Exception as e:
             logger.error(f"Error updating operation progress: {e}")
-    
+
     def update_help_text(self):
         """Update help text"""
         if self.config.plugins.pilotfs.enable_smart_context.value:
@@ -380,13 +413,12 @@ class PilotFSMain(Screen):
         else:
             help_text = "OK:Play/Open 0:Ctx 1-9:BMark CH±:Sort MENU:Tools"
         self["help_text"].setText(help_text)
-    
+
     # OK Button Long Press Detection
     def ok_pressed(self):
         """Handle OK button press - SIMPLE NAVIGATION"""
         # Long press disabled - always navigate immediately
         self.execute_ok_navigation()
-
 
     def execute_ok_navigation(self):
         """Execute navigation - PERFECT SMART BEHAVIOR"""
@@ -442,7 +474,7 @@ class PilotFSMain(Screen):
                     
         except Exception as e:
             logger.error(f"Error in OK navigation: {e}")
-            self.dialogs.show_message(f"Navigation error: {e}", type="error")
+            self.show_error("Navigation", e)
 
     def up(self):
         """Move up in file list"""
@@ -451,7 +483,7 @@ class PilotFSMain(Screen):
             self.update_info_panel()  # Fast update
         except Exception as e:
             logger.error(f"Error moving up: {e}")
-    
+
     def down(self):
         """Move down in file list"""
         try:
@@ -459,7 +491,41 @@ class PilotFSMain(Screen):
             self.update_info_panel()  # Fast update
         except Exception as e:
             logger.error(f"Error moving down: {e}")
-    
+
+    def page_up(self):
+        """Page up in file list"""
+        try:
+            for _ in range(10):  # Jump 10 items
+                self.active_pane.up()
+            self.update_info_panel()
+        except Exception as e:
+            logger.error(f"Error page up: {e}")
+
+    def page_down(self):
+        """Page down in file list"""
+        try:
+            for _ in range(10):  # Jump 10 items
+                self.active_pane.down()
+            self.update_info_panel()
+        except Exception as e:
+            logger.error(f"Error page down: {e}")
+
+    def go_home(self):
+        """Go to first item"""
+        try:
+            self.active_pane.instance.moveSelection(self.active_pane.instance.moveTop)
+            self.update_info_panel()
+        except Exception as e:
+            logger.error(f"Error going home: {e}")
+
+    def go_end(self):
+        """Go to last item"""
+        try:
+            self.active_pane.instance.moveSelection(self.active_pane.instance.moveBottom)
+            self.update_info_panel()
+        except Exception as e:
+            logger.error(f"Error going end: {e}")
+
     def focus_left(self):
         """Switch focus to left pane"""
         try:
@@ -469,7 +535,7 @@ class PilotFSMain(Screen):
             self.update_help_text()
         except Exception as e:
             logger.error(f"Error focusing left pane: {e}")
-    
+
     def focus_right(self):
         """Switch focus to right pane"""
         try:
@@ -479,7 +545,7 @@ class PilotFSMain(Screen):
             self.update_help_text()
         except Exception as e:
             logger.error(f"Error focusing right pane: {e}")
-    
+
     # File Operations
     def toggle_selection(self):
         """Toggle file selection - UPDATED to show red text in info panel"""
@@ -499,7 +565,7 @@ class PilotFSMain(Screen):
                 self.update_ui()
             except Exception as e:
                 logger.error(f"Error toggling selection: {e}")
-    
+
     def delete_request(self):
         """Request file deletion - RED button"""
         try:
@@ -531,8 +597,8 @@ class PilotFSMain(Screen):
                 )
         except Exception as e:
             logger.error(f"Error in delete request: {e}")
-            self.dialogs.show_message(f"Delete error: {e}", type="error")
-    
+            self.show_error("Delete", e)
+
     def _execute_delete(self, confirmed, item_path, item_name):
         """Execute deletion"""
         if not confirmed:
@@ -551,8 +617,8 @@ class PilotFSMain(Screen):
             self.dialogs.show_message(msg, type="info", timeout=2)
         except Exception as e:
             logger.error(f"Error executing delete: {e}")
-            self.dialogs.show_message(f"Delete failed: {e}", type="error")
-    
+            self.show_error("Delete", e)
+
     def rename_request(self):
         """Request file rename - GREEN button"""
         try:
@@ -584,8 +650,8 @@ class PilotFSMain(Screen):
             )
         except Exception as e:
             logger.error(f"Error in rename request: {e}")
-            self.dialogs.show_message(f"Rename error: {e}", type="error")
-    
+            self.show_error("Rename", e)
+
     def _execute_rename(self, new_name, old_path, old_name):
         """Execute rename"""
         if not new_name or new_name == old_name:
@@ -598,8 +664,8 @@ class PilotFSMain(Screen):
             self.dialogs.show_message(f"Renamed to: {new_name}", type="info", timeout=2)
         except Exception as e:
             logger.error(f"Error executing rename: {e}")
-            self.dialogs.show_message(f"Rename failed: {e}", type="error")
-    
+            self.show_error("Rename", e)
+
     def quick_copy(self):
         """Quick copy/move operation"""
         try:
@@ -623,8 +689,8 @@ class PilotFSMain(Screen):
             self.dialogs.show_transfer_dialog(files, dest, self.execute_transfer)
         except Exception as e:
             logger.error(f"Error in quick copy: {e}")
-            self.dialogs.show_message(f"Copy error: {e}", type="error")
-    
+            self.show_error("Copy", e)
+
     def get_selected_files(self):
         """Get selected files"""
         files = []
@@ -641,7 +707,7 @@ class PilotFSMain(Screen):
             logger.error(f"Error getting selected files: {e}")
         
         return files
-    
+
     def paste_from_clipboard(self):
         """Paste files from clipboard"""
         if not self.clipboard:
@@ -663,8 +729,8 @@ class PilotFSMain(Screen):
             )
         except Exception as e:
             logger.error(f"Error pasting from clipboard: {e}")
-            self.dialogs.show_message(f"Paste error: {e}", type="error")
-    
+            self.show_error("Paste", e)
+
     def execute_paste(self, confirmed, mode, files, dest):
         """Execute paste operation"""
         if not confirmed:
@@ -691,8 +757,8 @@ class PilotFSMain(Screen):
             logger.error(f"Error starting paste operation: {e}")
             with self.operation_lock:
                 self.operation_in_progress = False
-            self.dialogs.show_message(f"Paste failed: {e}", type="error")
-    
+            self.show_error("Paste", e)
+
     def _perform_paste(self, mode, files, dest):
         """Perform paste operation in thread"""
         try:
@@ -708,6 +774,7 @@ class PilotFSMain(Screen):
                     
                 except Exception as e:
                     logger.error(f"Paste failed for {src}: {e}")
+                    # Continue with next file
             
             # Operation complete
             with self.operation_lock:
@@ -719,12 +786,19 @@ class PilotFSMain(Screen):
                 self.clipboard = []
                 self.clipboard_mode = None
             
-            # Update UI
+            # Update UI in main thread
+            self.session.openWithCallback(
+                lambda: None,
+                MessageBox,
+                "Paste complete!",
+                type=MessageBox.TYPE_INFO,
+                timeout=2
+            )
+            
+            # Refresh panes
             self.active_pane.refresh()
             self.inactive_pane.refresh()
             self.update_ui()
-            
-            self.dialogs.show_message("Operation complete!", type="info")
             
         except Exception as e:
             logger.error(f"Paste operation failed: {e}")
@@ -732,8 +806,14 @@ class PilotFSMain(Screen):
                 self.operation_in_progress = False
                 self.operation_timer.stop()
             
-            self.dialogs.show_message(f"Operation failed:\n{e}", type="error")
-    
+            # Show error in main thread
+            self.session.openWithCallback(
+                lambda: None,
+                MessageBox,
+                f"Paste failed:\n{e}",
+                type=MessageBox.TYPE_ERROR
+            )
+
     def execute_transfer(self, mode, files, dest):
         """Execute file transfer"""
         with self.operation_lock:
@@ -757,8 +837,8 @@ class PilotFSMain(Screen):
             logger.error(f"Error starting transfer operation: {e}")
             with self.operation_lock:
                 self.operation_in_progress = False
-            self.dialogs.show_message(f"Transfer failed: {e}", type="error")
-    
+            self.show_error("Transfer", e)
+
     def _perform_transfer(self, mode, files, dest):
         """Perform transfer in thread"""
         try:
@@ -774,18 +854,26 @@ class PilotFSMain(Screen):
                     
                 except Exception as e:
                     logger.error(f"Transfer failed for {src}: {e}")
+                    # Continue with next file
             
             # Operation complete
             with self.operation_lock:
                 self.operation_in_progress = False
                 self.operation_timer.stop()
             
-            # Update UI
+            # Update UI in main thread
+            self.session.openWithCallback(
+                lambda: None,
+                MessageBox,
+                "Transfer complete!",
+                type=MessageBox.TYPE_INFO,
+                timeout=2
+            )
+            
+            # Refresh panes
             self.active_pane.refresh()
             self.inactive_pane.refresh()
             self.update_ui()
-            
-            self.dialogs.show_message("Transfer complete!", type="info")
             
         except Exception as e:
             logger.error(f"Transfer operation failed: {e}")
@@ -793,8 +881,14 @@ class PilotFSMain(Screen):
                 self.operation_in_progress = False
                 self.operation_timer.stop()
             
-            self.dialogs.show_message(f"Transfer failed:\n{e}", type="error")
-    
+            # Show error in main thread
+            self.session.openWithCallback(
+                lambda: None,
+                MessageBox,
+                f"Transfer failed:\n{e}",
+                type=MessageBox.TYPE_ERROR
+            )
+
     # Tools and Features
     def open_tools(self):
         """Open tools menu"""
@@ -806,8 +900,8 @@ class PilotFSMain(Screen):
             self.context_menu.show_tools_menu()
         except Exception as e:
             logger.error(f"Error opening tools menu: {e}")
-            self.dialogs.show_message(f"Tools menu error: {e}", type="error")
-    
+            self.show_error("Tools menu", e)
+
     def zero_pressed(self):
         """0 button - Show context menu"""
         try:
@@ -823,8 +917,8 @@ class PilotFSMain(Screen):
                 self.context_menu.show_context_menu()
         except Exception as e:
             logger.error(f"Error in zero pressed: {e}")
-            self.dialogs.show_message(f"Context menu error: {e}", type="error")
-    
+            self.show_error("Context menu", e)
+
     def quick_bookmark(self, num):
         """Quick bookmark access"""
         try:
@@ -844,8 +938,8 @@ class PilotFSMain(Screen):
                 self.dialogs.show_message(f"Bookmark {num} set to:\n{current}", type="info", timeout=2)
         except Exception as e:
             logger.error(f"Error in quick bookmark: {e}")
-            self.dialogs.show_message(f"Bookmark error: {e}", type="error")
-    
+            self.show_error("Bookmark", e)
+
     def preview_file(self):
         """Preview file contents"""
         try:
@@ -876,8 +970,8 @@ class PilotFSMain(Screen):
             self.dialogs.preview_file(file_path, self.file_ops, self.config)
         except Exception as e:
             logger.error(f"Error previewing file: {e}")
-            self.dialogs.show_message(f"Preview error: {e}", type="error")
-    
+            self.show_error("Preview", e)
+
     def preview_media(self):
         """Preview media file - IMPROVED with proper playback"""
         try:
@@ -891,11 +985,10 @@ class PilotFSMain(Screen):
             
             file_path = sel[0]
             
-            # Check if it's a media file
-            media_extensions = ['.mp4', '.mkv', '.avi', '.ts', '.m2ts', '.mp3', '.flac', '.wav']
-            if not any(file_path.lower().endswith(ext) for ext in media_extensions):
+            # Check if file can be played
+            if not self.can_play_file(file_path):
                 self.dialogs.show_message(
-                    "Not a media file!\n\nSupported: MP4, MKV, AVI, TS, MP3, FLAC, etc.",
+                    "Not a playable media file!\n\nSupported: MP4, MKV, AVI, TS, MP3, FLAC, etc.",
                     type="info"
                 )
                 return
@@ -920,8 +1013,26 @@ class PilotFSMain(Screen):
         except Exception as e:
             logger.error(f"Error previewing media: {e}")
             self.preview_in_progress = False
-            self.dialogs.show_message(f"Media preview error: {e}", type="error")
-    
+            self.show_error("Media preview", e)
+
+    def can_play_file(self, path):
+        """Check if file can be played"""
+        if not os.path.exists(path):
+            return False
+        
+        # Check file size
+        try:
+            size = os.path.getsize(path)
+            if size == 0:
+                return False
+        except:
+            return False
+        
+        # Check extension
+        ext = os.path.splitext(path)[1].lower()
+        supported = ['.mp4', '.mkv', '.avi', '.ts', '.m2ts', '.mp3', '.flac', '.wav', '.aac', '.ogg', '.m4a']
+        return ext in supported
+
     def show_icon_legend(self):
         """Show file type icon legend"""
         legend = "📋 FILE TYPE ICONS GUIDE:\n\n"
@@ -935,7 +1046,7 @@ class PilotFSMain(Screen):
         legend += "Icons appear in the info panel at the bottom."
         
         self.dialogs.show_message(legend, type="info")
-    
+
     def show_storage_selector(self):
         """Show storage device selector - FIXED to work properly"""
         if self.operation_in_progress:
@@ -964,10 +1075,7 @@ class PilotFSMain(Screen):
                             )
                     except Exception as e:
                         logger.error(f"Error navigating to storage: {e}")
-                        self.dialogs.show_message(
-                            f"Navigation error:\n{str(e)[:50]}",
-                            type="error"
-                        )
+                        self.show_error("Storage navigation", e)
             
             # Open storage selector with fixed callback
             self.dialogs.show_storage_selector(
@@ -977,8 +1085,8 @@ class PilotFSMain(Screen):
             
         except Exception as e:
             logger.error(f"Error showing storage selector: {e}")
-            self.dialogs.show_message(f"Storage selector error: {e}", type="error")
-    
+            self.show_error("Storage selector", e)
+
     def show_file_info(self):
         """Show detailed file information"""
         try:
@@ -1004,8 +1112,8 @@ class PilotFSMain(Screen):
                 self.dialogs.show_message(text, type="info")
         except Exception as e:
             logger.error(f"Error showing file info: {e}")
-            self.dialogs.show_message(f"File info error: {e}", type="error")
-    
+            self.show_error("File info", e)
+
     # Sorting
     def next_sort(self):
         """Cycle to next sort mode"""
@@ -1029,7 +1137,7 @@ class PilotFSMain(Screen):
                                      type="info", timeout=1)
         except Exception as e:
             logger.error(f"Error in next sort: {e}")
-    
+
     def prev_sort(self):
         """Cycle to previous sort mode"""
         try:
@@ -1052,7 +1160,7 @@ class PilotFSMain(Screen):
                                      type="info", timeout=1)
         except Exception as e:
             logger.error(f"Error in prev sort: {e}")
-    
+
     def apply_sorting(self):
         """Apply current sort mode to active pane"""
         try:
@@ -1086,7 +1194,7 @@ class PilotFSMain(Screen):
             self.active_pane.l.setList(items)
         except Exception as e:
             logger.error(f"Sorting failed: {e}")
-    
+
     def apply_show_dirs_first(self):
         """Apply show directories first setting"""
         try:
@@ -1101,7 +1209,27 @@ class PilotFSMain(Screen):
             self.active_pane.l.setList(self.active_pane.list)
         except Exception as e:
             logger.error(f"Show dirs first failed: {e}")
-    
+
+    def apply_filter(self, pattern):
+        """Apply filter to current pane"""
+        if not pattern:
+            self.filter_pattern = None
+            self.active_pane.refresh()
+            return
+        
+        self.filter_pattern = pattern.lower()
+        items = self.active_pane.list
+        
+        # Filter items
+        filtered = []
+        for item in items:
+            name = os.path.basename(item[0][0]).lower()
+            if self.filter_pattern in name:
+                filtered.append(item)
+        
+        self.active_pane.l.setList(filtered)
+        self["status_bar"].setText(f"Filter: {pattern} ({len(filtered)} items)")
+
     # System Methods
     def check_dependencies(self):
         """Check if required tools are available"""
@@ -1128,14 +1256,14 @@ class PilotFSMain(Screen):
         
         if missing:
             logger.warning(f"Missing tools: {', '.join(missing)}")
-    
+
     def movie_player_callback(self, *args):
         """Callback when movie player closes - return to plugin"""
         logger.info("Movie player closed, returning to plugin")
         self.preview_in_progress = False
         # Refresh the current view
         self.update_ui()
-    
+
     def play_media_file(self, path):
         """Play media file using Enigma2 service player"""
         try:
@@ -1165,7 +1293,7 @@ class PilotFSMain(Screen):
                 f"Cannot play media file:\n{os.path.basename(path)}\n\nError: {e}",
                 type="error"
             )
-    
+
     def play_with_external_player(self, path):
         """Play with external player as fallback"""
         import subprocess
@@ -1197,7 +1325,49 @@ class PilotFSMain(Screen):
             )
         
         threading.Thread(target=play_thread, daemon=True).start()
-    
+
+    def refresh_panes(self):
+        """Refresh both panes"""
+        try:
+            self["left_pane"].refresh()
+            self["right_pane"].refresh()
+            self.update_ui()
+            self["status_bar"].setText("Refreshed")
+        except Exception as e:
+            logger.error(f"Refresh error: {e}")
+
+    def show_error(self, context, error):
+        """Show user-friendly error message"""
+        error_msg = str(error)
+        if "Permission denied" in error_msg:
+            user_msg = f"{context}: Permission denied. Check file permissions."
+        elif "No space left" in error_msg:
+            user_msg = f"{context}: Disk full. Free up space and try again."
+        elif "No such file" in error_msg:
+            user_msg = f"{context}: File not found. It may have been moved or deleted."
+        else:
+            user_msg = f"{context}: {error_msg[:100]}"
+        
+        self.dialogs.show_message(user_msg, type="error")
+
+    def cleanup(self):
+        """Clean up resources"""
+        try:
+            if self.operation_timer.isActive():
+                self.operation_timer.stop()
+            
+            # Clear clipboard to free memory
+            self.clipboard.clear()
+            self.marked_files.clear()
+            
+            # Cancel any pending operations
+            with self.operation_lock:
+                self.operation_in_progress = False
+            
+            logger.info("Cleanup completed")
+        except Exception as e:
+            logger.error(f"Cleanup error: {e}")
+
     def close_plugin(self):
         """Clean shutdown"""
         if self.operation_in_progress:
@@ -1205,6 +1375,9 @@ class PilotFSMain(Screen):
             return
         
         try:
+            # Clean up resources
+            self.cleanup()
+            
             # Save paths if configured
             if self.config.plugins.pilotfs.save_left_on_exit.value == "yes":
                 self.config.plugins.pilotfs.left_path.value = self["left_pane"].getCurrentDirectory()
@@ -1219,7 +1392,7 @@ class PilotFSMain(Screen):
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
             self.close()
-    
+
     # Helper method for delete multiple
     def _execute_delete_multiple(self, confirmed, files):
         """Execute deletion of multiple items"""
