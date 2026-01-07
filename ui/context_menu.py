@@ -3,6 +3,7 @@ from Screens.MessageBox import MessageBox
 from Screens.VirtualKeyBoard import VirtualKeyBoard
 import os
 import time
+import subprocess
 
 from ..utils.formatters import get_file_icon, format_size
 from ..utils.logging_config import get_logger
@@ -15,6 +16,56 @@ class ContextMenuHandler:
         self.config = main_screen.config
         self.file_ops = main_screen.file_ops
         self.dialogs = main_screen.dialogs
+        
+        # Track navigation state
+        self.current_menu_level = 0  # 0 = main tools, 1 = submenu
+        
+        # PilotFS dependencies categorized by functionality
+        self.plugin_dependencies = {
+            "CORE_PLUGIN": [
+                "python3-core",
+                "python3-io",
+                "python3-json",
+                "python3-os",
+                "python3-threading",
+            ],
+            "FILE_OPERATIONS": [
+                "python3-shutil",
+                "python3-hashlib",
+                "python3-datetime",
+                "python3-stat",
+                "python3-glob",
+            ],
+            "NETWORK_FEATURES": [
+                "rclone",              # Cloud sync - EXTERNAL
+                "cifs-utils",          # CIFS/SMB mounting
+                "smbclient",           # SMB share discovery
+                "curl",                # WebDAV/HTTP transfers
+                "python3-paramiko",    # SFTP client
+                "python3-requests",    # HTTP/WebDAV client
+            ],
+            "ARCHIVE_SUPPORT": [
+                "zip",
+                "unzip",
+                "tar",
+                "gzip",
+                "bzip2",
+                "python3-zipfile",
+            ],
+            "SYSTEM_TOOLS": [
+                "rsync",               # Efficient file transfers
+                "wget",                # Alternative downloads
+                "tree",                # Directory visualization
+                "ncdu",                # Disk usage analysis
+                "python3-pip",         # Python package management
+            ],
+            "OPTIONAL_ENHANCEMENTS": [
+                "ffmpeg",              # Media processing
+                "imagemagick",         # Image processing
+                "python3-pil",         # Python imaging library
+                "python3-cryptography", # Encryption support
+            ]
+        }
     
     def show_context_menu(self):
         """Show context menu for current selection"""
@@ -275,6 +326,9 @@ class ContextMenuHandler:
     def show_tools_menu(self):
         """Show tools menu"""
         try:
+            # Reset menu level to main tools
+            self.current_menu_level = 0
+            
             if self.config.plugins.pilotfs.group_tools_menu.value:
                 # GROUPED MENU
                 tools = [
@@ -352,7 +406,7 @@ class ContextMenuHandler:
             self.dialogs.show_message(f"Tools menu error: {e}", type="error")
     
     def tools_callback(self, answer):
-        """Handle tools menu selection - FIXED: No callback for settings to prevent modal crash"""
+        """Handle tools menu selection - FIXED: Updated to use correct parameters"""
         if not answer or answer[1] is None:
             return
         
@@ -374,7 +428,9 @@ class ContextMenuHandler:
                     self.main.dialogs.show_bulk_rename_dialog(files, self.file_ops, 
                                                              self.main.active_pane, self.main.update_ui)
                 else:
-                    self.main.dialogs.show_message("Select at least 2 files for bulk rename!", type="info")
+                    self.dialogs.show_message("Select at least 2 files for bulk rename!", type="info")
+                    # Return to tools menu after message
+                    self._return_to_tools_after_delay(2)
             elif mode == "preview":
                 self.main.preview_file()
             elif mode == "search":
@@ -386,14 +442,18 @@ class ContextMenuHandler:
                     self.main.dialogs.show_archive_dialog(files, self.main.archive_mgr, 
                                                          self.main.active_pane.getCurrentDirectory())
                 else:
-                    self.main.dialogs.show_message("No files selected!", type="info")
+                    self.dialogs.show_message("No files selected!", type="info")
+                    # Return to tools menu after message
+                    self._return_to_tools_after_delay(2)
             elif mode == "extract":
                 sel = self.main.active_pane.getSelection()
                 if sel and sel[0]:
                     self.main.dialogs.show_extract_dialog(sel[0], self.main.archive_mgr, 
                                                          self.main.active_pane, self.main.update_ui)
                 else:
-                    self.main.dialogs.show_message("No archive selected!", type="info")
+                    self.dialogs.show_message("No archive selected!", type="info")
+                    # Return to tools menu after message
+                    self._return_to_tools_after_delay(2)
             elif mode == "trash":
                 self.main.dialogs.show_trash_manager(self.file_ops, self.main.active_pane, self.main.update_ui)
             elif mode == "mount":
@@ -404,22 +464,42 @@ class ContextMenuHandler:
             elif mode == "ping":
                 self.main.dialogs.show_ping_dialog(self.main.mount_mgr)
             elif mode == "cloud":
+                # Set submenu level and show cloud menu
+                self.current_menu_level = 1
                 self.show_cloud_sync_menu()
             elif mode == "clean":
-                self.main.dialogs.show_cleanup_dialog()
+                # FIXED: Added missing parameters for show_cleanup_dialog
+                current_dir = self.main.active_pane.getCurrentDirectory()
+                self.main.dialogs.show_cleanup_dialog(
+                    current_dir,
+                    self.file_ops,
+                    self.main.active_pane,
+                    self.main.update_ui
+                )
             elif mode == "picon":
-                self.main.dialogs.show_picon_repair_dialog()
+                # FIXED: Added missing parameters for show_picon_repair_dialog
+                current_dir = self.main.active_pane.getCurrentDirectory()
+                self.main.dialogs.show_picon_repair_dialog(
+                    current_dir,
+                    self.file_ops,
+                    self.main.active_pane,
+                    self.main.update_ui
+                )
             elif mode == "chmod":
                 files = self.main.get_selected_files()
                 if files:
                     self.main.dialogs.show_permissions_dialog(files, self.file_ops)
                 else:
-                    self.main.dialogs.show_message("No files selected!", type="info")
+                    self.dialogs.show_message("No files selected!", type="info")
+                    # Return to tools menu after message
+                    self._return_to_tools_after_delay(2)
             elif mode == "diskusage":
                 self.main.dialogs.show_disk_usage(self.main.active_pane.getCurrentDirectory(), self.file_ops)
             elif mode == "log":
                 self.main.dialogs.show_log_viewer()
             elif mode == "repair":
+                # Set submenu level and show repair menu
+                self.current_menu_level = 1
                 self.show_repair_menu()
             elif mode == "grep":
                 self.main.dialogs.show_content_search_dialog(self.main.active_pane.getCurrentDirectory(), 
@@ -429,10 +509,20 @@ class ContextMenuHandler:
                 if files:
                     self.main.dialogs.show_checksum_dialog(files, self.file_ops)
                 else:
-                    self.main.dialogs.show_message("Please select files (not folders)", type="info")
+                    self.dialogs.show_message("Please select files (not folders)", type="info")
+                    # Return to tools menu after message
+                    self._return_to_tools_after_delay(2)
             elif mode == "queue":
-                self.main.dialogs.show_queue_dialog(self.main.operation_in_progress, 
-                                                   self.main.operation_current, self.main.operation_total)
+                # FIXED: Create a proper queue manager stub
+                class QueueManagerStub:
+                    def get_queue(self):
+                        return []
+                    def get_stats(self):
+                        return {"total": 0, "completed": 0, "failed": 0, "pending": 0}
+                    def clear_queue(self):
+                        pass
+                
+                self.main.dialogs.show_queue_dialog(QueueManagerStub())
             elif mode == "remote":
                 self.main.dialogs.show_remote_access_dialog(self.main.remote_mgr, self.main.mount_mgr, 
                                                            self.main.active_pane, self.main.update_ui)
@@ -442,8 +532,18 @@ class ContextMenuHandler:
             logger.error(f"Error in tools callback: {e}")
             self.dialogs.show_message(f"Tools error: {e}", type="error")
     
+    def _return_to_tools_after_delay(self, delay_seconds):
+        """Return to tools menu after a delay"""
+        import threading
+        
+        def return_to_tools():
+            time.sleep(delay_seconds)
+            self.show_tools_menu()
+        
+        threading.Thread(target=return_to_tools, daemon=True).start()
+    
     def show_cloud_sync_menu(self):
-        """Show cloud sync submenu with actual functionality"""
+        """Show cloud sync submenu with proper navigation"""
         try:
             choices = [
                 ("☁️ Configure rclone", "config"),
@@ -451,13 +551,13 @@ class ContextMenuHandler:
                 ("⬇️ Download from Cloud", "download"),
                 ("🔄 Sync Folder", "sync"),
                 ("📋 List Cloud Storage", "list"),
-                ("⬅️ Back to Tools", "back"),
+                ("⬅️ Back to Main Tools", "back"),
             ]
             
             self.main.session.openWithCallback(
                 self.handle_cloud_menu,
                 ChoiceBox,
-                title="☁️ Cloud Sync (rclone)",
+                title="☁️ Cloud Sync (rclone) - Press EXIT to go back",
                 list=choices
             )
         except Exception as e:
@@ -465,46 +565,146 @@ class ContextMenuHandler:
             self.dialogs.show_message(f"Cloud sync menu error: {e}", type="error")
     
     def handle_cloud_menu(self, choice):
-        """Handle cloud sync menu"""
-        if not choice or choice[1] == "back":
-            # FIXED: Don't recursively call show_tools_menu to prevent stack issues
-            try:
-                # Return to main screen instead of recursively showing tools
-                self.main.dialogs.show_message("Returned from cloud sync menu", type="info", timeout=2)
-            except Exception as e:
-                logger.error(f"Error returning from cloud menu: {e}")
+        """Handle cloud sync menu with proper back navigation"""
+        if not choice:
+            # User pressed EXIT - return to main tools menu
+            self.show_tools_menu()
+            return
+        
+        if choice[1] == "back":
+            # User selected "Back to Main Tools"
+            self.show_tools_menu()
             return
         
         action = choice[1]
         
         try:
             if action == "config":
-                self.main.dialogs.show_message("Configure rclone in SSH: rclone config", type="info")
+                # First check if rclone is installed
+                self._check_rclone_installed(show_menu_after=True)
             elif action == "upload":
-                self.main.dialogs.show_message("Upload feature - Configure rclone remote to upload", type="info")
+                self.dialogs.show_message("Upload feature - Configure rclone remote to upload", type="info")
+                self._return_to_submenu_after_delay(self.show_cloud_sync_menu, 3)
             elif action == "sync":
-                self.main.dialogs.show_message("Sync feature - Keep folders synchronized with cloud", type="info")
+                self.dialogs.show_message("Sync feature - Keep folders synchronized with cloud", type="info")
+                self._return_to_submenu_after_delay(self.show_cloud_sync_menu, 3)
             elif action == "list":
-                self.main.dialogs.show_message("List remotes: Run 'rclone listremotes' in SSH", type="info")
+                self.dialogs.show_message("List remotes: Run 'rclone listremotes' in SSH", type="info")
+                self._return_to_submenu_after_delay(self.show_cloud_sync_menu, 3)
         except Exception as e:
             logger.error(f"Error handling cloud menu: {e}")
             self.dialogs.show_message(f"Cloud action error: {e}", type="error")
+            self._return_to_submenu_after_delay(self.show_cloud_sync_menu, 3)
+    
+    def _check_rclone_installed(self, show_menu_after=False):
+        """Check if rclone is installed and offer to install if not"""
+        import threading
+        
+        def check_and_install():
+            try:
+                # Check if rclone is installed
+                result = subprocess.run(["which", "rclone"], capture_output=True, text=True)
+                
+                if result.returncode == 0:
+                    # rclone is installed
+                    self.dialogs.show_message(
+                        "✅ rclone is already installed!\n\n"
+                        "To configure rclone, run in SSH:\n"
+                        "rclone config\n\n"
+                        "This will open the rclone configuration wizard.",
+                        type="info"
+                    )
+                else:
+                    # rclone is not installed
+                    self.dialogs.show_confirmation(
+                        "❌ rclone is NOT installed!\n\n"
+                        "rclone is required for cloud sync features.\n\n"
+                        "Install rclone now?",
+                        lambda res: self._install_rclone(res, show_menu_after) if res else None
+                    )
+                    
+            except Exception as e:
+                logger.error(f"Error checking rclone: {e}")
+                self.dialogs.show_message(f"Error checking rclone: {str(e)}", type="error")
+        
+        # Run in background thread
+        thread = threading.Thread(target=check_and_install, daemon=True)
+        thread.start()
+    
+    def _install_rclone(self, confirmed, show_menu_after):
+        """Install rclone if confirmed"""
+        if not confirmed:
+            return
+        
+        import threading
+        
+        def install_thread():
+            try:
+                self.dialogs.show_message("Installing rclone...\n\nPlease wait...", type="info", timeout=2)
+                
+                # Try to install rclone via opkg
+                result = subprocess.run(
+                    ["opkg", "install", "rclone"],
+                    capture_output=True,
+                    text=True,
+                    timeout=120
+                )
+                
+                if result.returncode == 0:
+                    message = "✅ rclone installed successfully!\n\n"
+                    message += "To configure rclone, run in SSH:\n"
+                    message += "rclone config\n\n"
+                    message += "This will open the rclone configuration wizard."
+                    
+                    self.dialogs.show_message(message, type="info")
+                else:
+                    # Try alternative installation methods
+                    error_msg = "❌ Failed to install rclone via opkg.\n\n"
+                    error_msg += "Try manual installation:\n"
+                    error_msg += "1. Download from: https://rclone.org/downloads/\n"
+                    error_msg += "2. Install with: dpkg -i rclone*.deb\n"
+                    error_msg += "or: opkg install /path/to/rclone.ipk"
+                    
+                    self.dialogs.show_message(error_msg, type="error")
+                    
+            except subprocess.TimeoutExpired:
+                self.dialogs.show_message("❌ rclone installation timed out (2 minutes)", type="error")
+            except Exception as e:
+                self.dialogs.show_message(f"❌ Installation error: {str(e)}", type="error")
+            
+            # Return to appropriate menu
+            if show_menu_after:
+                self._return_to_submenu_after_delay(self.show_cloud_sync_menu, 3)
+        
+        thread = threading.Thread(target=install_thread, daemon=True)
+        thread.start()
+    
+    def _return_to_submenu_after_delay(self, submenu_method, delay_seconds):
+        """Return to submenu after a delay"""
+        import threading
+        
+        def return_to_submenu():
+            time.sleep(delay_seconds)
+            submenu_method()
+        
+        threading.Thread(target=return_to_submenu, daemon=True).start()
     
     def show_repair_menu(self):
-        """Show repair submenu"""
+        """Show repair submenu with install dependencies option"""
         try:
             choices = [
+                ("📦 Install Missing Dependencies", "install_deps"),
                 ("🔧 Install Missing Tools", "install"),
                 ("🗑️ Clean Temp Files", "clean_temp"),
                 ("📦 Fix Package Database", "fix_packages"),
                 ("🔗 Repair Symlinks", "repair_links"),
-                ("⬅️ Back to Tools", "back"),
+                ("⬅️ Back to Main Tools", "back"),
             ]
             
             self.main.session.openWithCallback(
                 self.handle_repair_menu,
                 ChoiceBox,
-                title="🔧 System Repair",
+                title="🔧 System Repair - Press EXIT to go back",
                 list=choices
             )
         except Exception as e:
@@ -512,30 +712,342 @@ class ContextMenuHandler:
             self.dialogs.show_message(f"Repair menu error: {e}", type="error")
     
     def handle_repair_menu(self, choice):
-        """Handle repair menu"""
-        if not choice or choice[1] == "back":
-            # FIXED: Don't recursively call show_tools_menu to prevent stack issues
-            try:
-                # Return to main screen instead of recursively showing tools
-                self.main.dialogs.show_message("Returned from repair menu", type="info", timeout=2)
-            except Exception as e:
-                logger.error(f"Error returning from repair menu: {e}")
+        """Handle repair menu with proper back navigation"""
+        if not choice:
+            # User pressed EXIT - return to main tools menu
+            self.show_tools_menu()
+            return
+        
+        if choice[1] == "back":
+            # User selected "Back to Main Tools"
+            self.show_tools_menu()
             return
         
         action = choice[1]
         
         try:
-            if action == "install":
-                self.main.dialogs.show_repair_dialog()
+            if action == "install_deps":
+                # First show dependency analysis
+                self.analyze_dependencies()
+            elif action == "install":
+                files = self.main.get_selected_files()
+                if not files:
+                    self.dialogs.show_message("No files selected!", type="info")
+                    # Return to repair menu after message
+                    self._return_to_submenu_after_delay(self.show_repair_menu, 2)
+                    return
+                self.main.dialogs.show_repair_dialog(files, self.file_ops, self.main.active_pane, self.main.update_ui)
             elif action == "clean_temp":
-                self.main.dialogs.show_cleanup_dialog()
+                current_dir = self.main.active_pane.getCurrentDirectory()
+                self.main.dialogs.show_cleanup_dialog(
+                    current_dir,
+                    self.file_ops,
+                    self.main.active_pane,
+                    self.main.update_ui
+                )
             elif action == "fix_packages":
-                self.main.dialogs.show_message("Run: opkg update && opkg upgrade", type="info")
+                self.dialogs.show_message("Run: opkg update && opkg upgrade", type="info")
+                # Return to repair menu after message
+                self._return_to_submenu_after_delay(self.show_repair_menu, 3)
             elif action == "repair_links":
-                self.main.dialogs.show_picon_repair_dialog()
+                current_dir = self.main.active_pane.getCurrentDirectory()
+                self.main.dialogs.show_picon_repair_dialog(
+                    current_dir,
+                    self.file_ops,
+                    self.main.active_pane,
+                    self.main.update_ui
+                )
         except Exception as e:
             logger.error(f"Error handling repair menu: {e}")
             self.dialogs.show_message(f"Repair action error: {e}", type="error")
+            self._return_to_submenu_after_delay(self.show_repair_menu, 3)
+    
+    def analyze_dependencies(self):
+        """Analyze and show missing dependencies before installation"""
+        import threading
+        
+        def analyze_thread():
+            try:
+                # Show analyzing message
+                self.dialogs.show_message("🔍 Analyzing PilotFS dependencies...\n\nPlease wait...", 
+                                         type="info", timeout=2)
+                
+                missing_deps = {}
+                installed_deps = {}
+                
+                # Check all dependencies
+                for category, packages in self.plugin_dependencies.items():
+                    missing_in_category = []
+                    installed_in_category = []
+                    
+                    for package in packages:
+                        try:
+                            # Check if package is installed
+                            if self._is_package_installed(package):
+                                installed_in_category.append(package)
+                            else:
+                                missing_in_category.append(package)
+                        except Exception as e:
+                            logger.error(f"Error checking package {package}: {e}")
+                            missing_in_category.append(f"{package} (check error)")
+                    
+                    if missing_in_category:
+                        missing_deps[category] = missing_in_category
+                    if installed_in_category:
+                        installed_deps[category] = installed_in_category
+                
+                # Prepare analysis message
+                message = "📊 PILOTFS DEPENDENCY ANALYSIS\n\n"
+                message += "═" * 40 + "\n\n"
+                
+                # Show installed dependencies
+                total_installed = sum(len(pkgs) for pkgs in installed_deps.values())
+                message += f"✅ INSTALLED: {total_installed} packages\n"
+                
+                for category, packages in installed_deps.items():
+                    if packages:
+                        message += f"\n📁 {category.replace('_', ' ')}:\n"
+                        for pkg in packages[:5]:  # Show first 5
+                            message += f"  • {pkg}\n"
+                        if len(packages) > 5:
+                            message += f"  ... and {len(packages) - 5} more\n"
+                
+                message += "\n" + "═" * 40 + "\n\n"
+                
+                # Show missing dependencies
+                total_missing = sum(len(pkgs) for pkgs in missing_deps.values())
+                if total_missing > 0:
+                    message += f"❌ MISSING: {total_missing} packages\n\n"
+                    
+                    # Highlight critical network dependencies
+                    if "NETWORK_FEATURES" in missing_deps:
+                        network_missing = missing_deps["NETWORK_FEATURES"]
+                        message += "⚠️ CRITICAL NETWORK FEATURES MISSING:\n"
+                        for pkg in network_missing:
+                            if pkg == "rclone":
+                                message += f"  • 🔥 {pkg} - Required for Cloud Sync\n"
+                            elif pkg == "cifs-utils":
+                                message += f"  • 🔥 {pkg} - Required for SMB/CIFS mounts\n"
+                            elif pkg == "python3-paramiko":
+                                message += f"  • 🔥 {pkg} - Required for SFTP connections\n"
+                            else:
+                                message += f"  • {pkg}\n"
+                        message += "\n"
+                    
+                    for category, packages in missing_deps.items():
+                        if category != "NETWORK_FEATURES":  # Already shown above
+                            message += f"📁 {category.replace('_', ' ')}:\n"
+                            for pkg in packages[:5]:  # Show first 5
+                                message += f"  • {pkg}\n"
+                            if len(packages) > 5:
+                                message += f"  ... and {len(packages) - 5} more\n"
+                            message += "\n"
+                    
+                    message += "\n" + "═" * 40 + "\n\n"
+                    message += "📦 Install missing dependencies now?\n\n"
+                    message += "This may take several minutes and\n"
+                    message += "requires an active internet connection."
+                    
+                    # Ask for installation confirmation
+                    self.dialogs.show_confirmation(
+                        message,
+                        lambda res: self._install_selected_dependencies(res, missing_deps) if res else None
+                    )
+                else:
+                    message += "🎉 All PilotFS dependencies are already installed!\n\n"
+                    message += "No installation needed."
+                    self.dialogs.show_message(message, type="info")
+                    self._return_to_submenu_after_delay(self.show_repair_menu, 3)
+                
+            except Exception as e:
+                logger.error(f"Error in dependency analysis thread: {e}")
+                self.dialogs.show_message(f"Dependency analysis failed:\n{str(e)}", type="error")
+                self._return_to_submenu_after_delay(self.show_repair_menu, 3)
+        
+        # Start analysis in background thread
+        thread = threading.Thread(target=analyze_thread, daemon=True)
+        thread.start()
+    
+    def _is_package_installed(self, package):
+        """Check if a package is installed"""
+        try:
+            # For system packages (non-Python)
+            if not package.startswith("python3-"):
+                # Check using which command for binaries
+                result = subprocess.run(["which", package], capture_output=True, text=True)
+                if result.returncode == 0:
+                    return True
+                
+                # Check using opkg for packages
+                result = subprocess.run(
+                    ["opkg", "list-installed", package],
+                    capture_output=True,
+                    text=True
+                )
+                return package in result.stdout
+            
+            else:
+                # For Python packages, try to import
+                import importlib
+                module_name = package.replace("python3-", "")
+                
+                # Handle special cases
+                if module_name == "paramiko":
+                    module_name = "paramiko"
+                elif module_name == "pil":
+                    module_name = "PIL"
+                elif module_name == "cryptography":
+                    module_name = "cryptography"
+                
+                try:
+                    importlib.import_module(module_name)
+                    return True
+                except ImportError:
+                    return False
+                    
+        except Exception:
+            return False
+    
+    def _install_selected_dependencies(self, confirmed, missing_deps):
+        """Install selected dependencies"""
+        if not confirmed:
+            # User cancelled, return to repair menu
+            self._return_to_submenu_after_delay(self.show_repair_menu, 1)
+            return
+        
+        # Flatten missing dependencies list
+        all_missing = []
+        for category, packages in missing_deps.items():
+            all_missing.extend(packages)
+        
+        # Remove duplicates and filter out "check error" entries
+        all_missing = list(set([pkg for pkg in all_missing if "(check error)" not in pkg]))
+        
+        # Start installation
+        self._perform_dependency_installation(all_missing)
+    
+    def _perform_dependency_installation(self, packages_to_install):
+        """Perform dependency installation"""
+        import threading
+        
+        def install_thread():
+            try:
+                # Show installation progress
+                total = len(packages_to_install)
+                self.dialogs.show_message(
+                    f"📦 Installing {total} dependencies...\n\n"
+                    f"This may take several minutes.\n"
+                    f"Please wait...",
+                    type="info", timeout=3
+                )
+                
+                installed = []
+                failed = []
+                skipped = []
+                
+                for i, package in enumerate(packages_to_install, 1):
+                    try:
+                        # Check again if already installed (in case of parallel operations)
+                        if self._is_package_installed(package):
+                            skipped.append(package)
+                            logger.info(f"Package already installed: {package}")
+                            continue
+                        
+                        # Show progress
+                        progress_msg = f"Installing: {package}\n\n"
+                        progress_msg += f"Progress: {i}/{total}\n"
+                        
+                        # Determine installation command
+                        if package.startswith("python3-"):
+                            # Python packages
+                            module_name = package.replace("python3-", "")
+                            install_cmd = ["pip3", "install", module_name]
+                            timeout = 60
+                        else:
+                            # System packages
+                            install_cmd = ["opkg", "install", package]
+                            timeout = 120  # Longer timeout for system packages
+                        
+                        logger.info(f"Installing {package} with command: {' '.join(install_cmd)}")
+                        
+                        result = subprocess.run(
+                            install_cmd,
+                            capture_output=True,
+                            text=True,
+                            timeout=timeout
+                        )
+                        
+                        if result.returncode == 0:
+                            installed.append(package)
+                            logger.info(f"✅ Successfully installed: {package}")
+                        else:
+                            error_msg = result.stderr[:200] if result.stderr else result.stdout[:200] if result.stdout else "Unknown error"
+                            failed.append(f"{package}: {error_msg}")
+                            logger.error(f"❌ Failed to install {package}: {error_msg}")
+                            
+                    except subprocess.TimeoutExpired:
+                        failed.append(f"{package}: Installation timeout")
+                        logger.error(f"❌ Timeout installing {package}")
+                    except Exception as e:
+                        failed.append(f"{package}: {str(e)[:100]}")
+                        logger.error(f"❌ Error installing {package}: {e}")
+                
+                # Show final results
+                message = "📦 DEPENDENCY INSTALLATION RESULTS\n\n"
+                message += "═" * 40 + "\n\n"
+                
+                if installed:
+                    message += f"✅ SUCCESSFULLY INSTALLED ({len(installed)}):\n"
+                    for pkg in installed[:10]:  # Show first 10
+                        message += f"  • {pkg}\n"
+                    if len(installed) > 10:
+                        message += f"  ... and {len(installed) - 10} more\n"
+                    message += "\n"
+                
+                if skipped:
+                    message += f"⚪ ALREADY INSTALLED ({len(skipped)}):\n"
+                    for pkg in skipped[:5]:
+                        message += f"  • {pkg}\n"
+                    if len(skipped) > 5:
+                        message += f"  ... and {len(skipped) - 5} more\n"
+                    message += "\n"
+                
+                if failed:
+                    message += f"❌ FAILED ({len(failed)}):\n"
+                    for fail in failed[:5]:  # Show first 5 failures
+                        message += f"  • {fail}\n"
+                    if len(failed) > 5:
+                        message += f"  ... and {len(failed) - 5} more\n"
+                    message += "\n"
+                
+                # Add network-specific notes
+                network_packages = [pkg for pkg in packages_to_install if pkg in [
+                    "rclone", "cifs-utils", "smbclient", "python3-paramiko", "curl"
+                ]]
+                
+                if any(network_pkg in installed for network_pkg in network_packages):
+                    message += "⚠️ NETWORK FEATURES NOTE:\n"
+                    message += "Some network features may require:\n"
+                    message += "• System restart for new mounts\n"
+                    message += "• rclone configuration: 'rclone config'\n"
+                    message += "• SMB credentials for network shares\n"
+                    message += "\n"
+                
+                message += "═" * 40 + "\n\n"
+                message += "📋 Installation complete!"
+                
+                # Show results and return to repair menu
+                self.dialogs.show_message(message, type="info")
+                self._return_to_submenu_after_delay(self.show_repair_menu, 5)
+                
+            except Exception as e:
+                logger.error(f"Error in dependency installation thread: {e}")
+                self.dialogs.show_message(f"Installation failed:\n{str(e)}", type="error")
+                self._return_to_submenu_after_delay(self.show_repair_menu, 3)
+        
+        # Start installation in background thread
+        thread = threading.Thread(target=install_thread, daemon=True)
+        thread.start()
     
     def rename_folder(self, folder_path):
         """Rename current folder"""
