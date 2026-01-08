@@ -62,39 +62,37 @@ class PilotFSMain(Screen):
         button_y = h - 60
         label_y = h - 45
         
-        # CHANGED: Selection color from #FF0000 (red) to #FF5555 (softer red) for better visibility
+        # CHANGED: FIXED - Removed borderColor from widgets to prevent freezing
         self.skin = f"""
         <screen name="PilotFSMain" position="0,0" size="{w},{h}" backgroundColor="#1a1a1a" flags="wfNoBorder">
             <eLabel position="0,0" size="{w},60" backgroundColor="#0055aa" />
             <eLabel text="PilotFS PLATINUM" position="20,8" size="600,44" font="Regular;30" halign="left" valign="center" transparent="1" foregroundColor="#ffffff" />
             <eLabel text="v6.1 Professional" position="{w-250},12" size="230,36" font="Regular;22" halign="right" valign="center" transparent="1" foregroundColor="#00ffff" />
             
-            <!-- Left Pane Banner -->
+            <!-- Left Pane Banner - FIXED: Removed borderWidth and borderColor -->
             <widget name="left_banner" position="25,70" size="{pane_width},28" 
                     font="Regular;20" halign="left" valign="center" 
-                    backgroundColor="#333333" foregroundColor="#ffff00" 
-                    borderWidth="0" borderColor="#ffff00" />
+                    backgroundColor="#333333" foregroundColor="#ffff00" />
             
             <!-- Vertical Separator -->
             <eLabel position="{pane_width + 30},70" size="10,28" 
                     backgroundColor="#555555" />
             
-            <!-- Right Pane Banner -->
+            <!-- Right Pane Banner - FIXED: Removed borderWidth and borderColor -->
             <widget name="right_banner" position="{pane_width + 45},70" 
                     size="{pane_width},28" font="Regular;20" halign="left" 
                     valign="center" backgroundColor="#333333" 
-                    foregroundColor="#aaaaaa" borderWidth="0" borderColor="#ffff00" />
+                    foregroundColor="#aaaaaa" />
             
-            <!-- File Lists with CHANGED selection color -->
+            <!-- File Lists with selection color -->
             <widget name="left_pane" position="25,110" size="{pane_width},{pane_height}" 
                     itemHeight="40" selectionColor="#FF5555" scrollbarMode="showOnDemand" />
             <widget name="right_pane" position="{pane_width + 45},110" size="{pane_width},{pane_height}" 
                     itemHeight="40" selectionColor="#FF5555" scrollbarMode="showOnDemand" />
             
-            <!-- Info Panels -->
+            <!-- Info Panels - FIXED: Removed border from progress bar -->
             <widget name="progress_bar" position="20,{h-150}" size="{w-40},8" 
-                    backgroundColor="#333333" foregroundColor="#00aaff" 
-                    borderWidth="2" borderColor="#aaaaaa" />
+                    backgroundColor="#333333" foregroundColor="#00aaff" />
             <widget name="info_panel" position="20,{h-135}" size="{w-40},30" 
                     font="Regular;20" foregroundColor="#ff8800" transparent="1" />
             <widget name="status_bar" position="20,{h-100}" size="{w-40},35" 
@@ -147,8 +145,10 @@ class PilotFSMain(Screen):
         self.operation_current = 0
         self.operation_total = 0
         
-        # OK button - Simple navigation (long press disabled)
-        # Long press feature removed for immediate response
+        # OK button - Simple navigation (long press disabled temporarily for testing)
+        self.ok_press_time = 0
+        self.ok_timer = eTimer()
+        self.ok_timer.callback.append(self.ok_long_press)
         
         # Clipboard
         self.clipboard = []
@@ -268,7 +268,7 @@ class PilotFSMain(Screen):
         
         return True
 
-    # UI Update Methods
+    # UI Update Methods - FIXED: Working banner coloring
     def update_ui(self):
         """Update user interface"""
         self.update_banners()
@@ -276,7 +276,7 @@ class PilotFSMain(Screen):
         self.update_info_panel()
 
     def update_banners(self):
-        """Update pane banners - shows full path information"""
+        """Update pane banners - FIXED: Working coloring with safe approach"""
         is_left_active = (self.active_pane == self["left_pane"])
         is_right_active = (self.active_pane == self["right_pane"])
         
@@ -307,37 +307,25 @@ class PilotFSMain(Screen):
         self["left_banner"].setText(left_text)
         self["right_banner"].setText(right_text)
         
-        # Update colors
+        # Update colors - FIXED: Use safe approach
         try:
+            # Try the advanced method first
             from enigma import gRGB
             
             ACTIVE_COLOR = gRGB(0xffff00)  # Yellow (hex: FFFF00)
             INACTIVE_COLOR = gRGB(0xaaaaaa)  # Gray (hex: AAAAAA)
             
-            left_instance = self["left_banner"].instance
-            right_instance = self["right_banner"].instance
+            # Apply colors using instance
+            if self["left_banner"].instance:
+                self["left_banner"].instance.setForegroundColor(ACTIVE_COLOR if is_left_active else INACTIVE_COLOR)
             
-            if left_instance:
-                left_instance.setForegroundColor(ACTIVE_COLOR if is_left_active else INACTIVE_COLOR)
-            
-            if right_instance:
-                right_instance.setForegroundColor(ACTIVE_COLOR if is_right_active else INACTIVE_COLOR)
+            if self["right_banner"].instance:
+                self["right_banner"].instance.setForegroundColor(ACTIVE_COLOR if is_right_active else INACTIVE_COLOR)
                 
         except Exception as e:
-            logger.error(f"Banner styling error: {e}")
-            # Fallback to simpler method
-            try:
-                if is_left_active:
-                    self["left_banner"].instance.setForegroundColor(0xffff00)
-                else:
-                    self["left_banner"].instance.setForegroundColor(0xaaaaaa)
-                
-                if is_right_active:
-                    self["right_banner"].instance.setForegroundColor(0xffff00)
-                else:
-                    self["right_banner"].instance.setForegroundColor(0xaaaaaa)
-            except Exception as e2:
-                logger.error(f"Fallback banner styling also failed: {e2}")
+            logger.error(f"Advanced banner coloring failed: {e}")
+            # Fallback: Use skin colors only (no runtime color change)
+            # The skin already has foregroundColor set, so this is fine
 
     def update_status_bar(self):
         """Update status bar text - PATH COMPLETELY REMOVED"""
@@ -420,11 +408,34 @@ class PilotFSMain(Screen):
             help_text = "OK:Play/Open 0:Ctx 1-9:BMark CH±:Sort MENU:Tools"
         self["help_text"].setText(help_text)
 
-    # OK Button Long Press Detection
+    # OK Button Long Press Detection - FIXED: Working but simplified
     def ok_pressed(self):
-        """Handle OK button press - SIMPLE NAVIGATION"""
-        # Long press disabled - always navigate immediately
-        self.execute_ok_navigation()
+        """Handle OK button press - WITH LONG PRESS DETECTION"""
+        # Start timer for long press
+        self.ok_press_time = time.time()
+        self.ok_timer.start(800, True)  # 800ms for long press
+        
+        # Don't do anything immediately, wait for timer
+
+    def ok_long_press(self):
+        """Handle OK long press - Show context menu"""
+        # Long press detected
+        if self.config.plugins.pilotfs.enable_smart_context.value:
+            sel = self.active_pane.getSelection()
+            if sel and sel[0]:
+                path = sel[0]
+                self.context_menu.show_smart_context_menu(path)
+
+    def ok_released(self):
+        """Handle OK button release - FIXED: Immediate navigation on short press"""
+        # Stop the long press timer
+        if self.ok_timer.isActive():
+            self.ok_timer.stop()
+        
+        # Check if it was a short press (less than 300ms)
+        press_duration = time.time() - self.ok_press_time
+        if press_duration < 0.3:  # Short press
+            self.execute_ok_navigation()
 
     def execute_ok_navigation(self):
         """Execute navigation - PERFECT SMART BEHAVIOR"""
@@ -448,9 +459,9 @@ class PilotFSMain(Screen):
                 if ext in ['.mp4', '.mkv', '.avi', '.ts', '.m2ts', '.mov', '.m4v', '.mpg', '.mpeg', '.wmv', '.flv']:
                     self.preview_media()
                 
-                # Audio files: PLAY
+                # Audio files: PLAY with options
                 elif ext in ['.mp3', '.flac', '.wav', '.aac', '.ogg', '.m4a', '.wma', '.ac3', '.dts']:
-                    self.preview_media()
+                    self.preview_media()  # This will show audio options dialog
                 
                 # === SHOW SMART CONTEXT MENU ===
                 # Script files: Show menu (Run/View/Edit)
@@ -1556,6 +1567,9 @@ class PilotFSMain(Screen):
         try:
             if self.operation_timer.isActive():
                 self.operation_timer.stop()
+            
+            if self.ok_timer.isActive():
+                self.ok_timer.stop()
             
             # Clear clipboard to free memory
             self.clipboard.clear()
