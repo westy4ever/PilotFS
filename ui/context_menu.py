@@ -1228,13 +1228,13 @@ class ContextMenuHandler:
             logger.error(f"Error moving to other pane: {e}")
             self.dialogs.show_message(f"Move error: {e}", type="error")
     
-    def edit_text_file(self, file_path):
+    def edit_text_file(self, item_path):
         """Edit text file"""
         try:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            with open(item_path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read(5000)
             
-            preview = f"📝 Edit: {os.path.basename(file_path)}\n\n"
+            preview = f"📝 Edit: {os.path.basename(item_path)}\n\n"
             preview += content[:2000]
             if len(content) > 2000:
                 preview += "\n\n... (file truncated)"
@@ -1295,8 +1295,8 @@ class ContextMenuHandler:
                 self._show_package_menu(file_path, filename)
             elif ext in ['.mp4', '.mkv', '.avi', '.ts', '.m2ts']:
                 self._show_media_menu(file_path, filename)
-            elif ext in ['.mp3', '.flac', '.wav', '.aac']:
-                self._show_audio_menu(file_path, filename)
+            elif ext in ['.mp3', '.flac', '.wav', '.aac', '.ogg', '.m4a', '.wma', '.ac3', '.dts']:
+                self._show_audio_menu(file_path, filename)  # NEW: Enhanced audio menu
             elif ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp']:
                 self._show_image_menu(file_path, filename)
             elif ext in ['.txt', '.log', '.conf', '.cfg', '.ini', '.xml', '.json']:
@@ -1638,25 +1638,163 @@ class ContextMenuHandler:
             logger.error(f"Error handling media action: {e}")
             self.dialogs.show_message(f"Media action error: {e}", type="error")
     
+    # NEW: ENHANCED AUDIO MENU WITH MEDIAPLAYER INTEGRATION
     def _show_audio_menu(self, file_path, filename):
-        """Context menu for audio files"""
+        """Context menu for audio files - ENHANCED WITH OPTIONS"""
         try:
+            # Check if MediaPlayer is available
+            try:
+                from .media_player import MediaPlayer
+                media_player_available = True
+            except ImportError:
+                media_player_available = False
+            
             menu_items = [
                 ("Cancel", None),
-                ("Play audio file", "play"),
-                ("View file info", "info"),
-                ("Copy to other pane", "copy_other"),
+                ("🎵 Play this audio file", "play_single"),
+                ("🎵 Play all audio files in directory", "play_all"),
+                ("📋 View file info", "info"),
+                ("📁 Copy to other pane", "copy_other"),
             ]
             
+            # Add MediaPlayer specific options if available
+            if media_player_available:
+                menu_items.insert(2, ("🎧 Enhanced Media Player", "enhanced_play"))
+                menu_items.insert(3, ("🔀 Create Playlist", "create_playlist"))
+            
             self.main.session.openWithCallback(
-                lambda choice: self._handle_media_action(choice, file_path, filename) if choice and choice[1] else None,
+                lambda choice: self._handle_audio_action(choice, file_path, filename) if choice and choice[1] else None,
                 ChoiceBox,
-                title="Audio: " + filename,
+                title="🎵 Audio: " + filename,
                 list=menu_items
             )
         except Exception as e:
             logger.error(f"Error showing audio menu: {e}")
             self.dialogs.show_message(f"Audio menu error: {e}", type="error")
+    
+    def _handle_audio_action(self, choice, file_path, filename):
+        """Handle audio menu action"""
+        action = choice[1]
+        
+        try:
+            if action == "play_single":
+                self.main._play_single_audio(file_path)
+            elif action == "play_all":
+                self.main._play_all_audio_in_directory(file_path)
+            elif action == "enhanced_play":
+                self._start_enhanced_media_player(file_path)
+            elif action == "create_playlist":
+                self._create_audio_playlist(file_path)
+            elif action == "info":
+                self.main.show_file_info()
+            elif action == "copy_other":
+                self.copy_to_other_pane(file_path)
+        except Exception as e:
+            logger.error(f"Error handling audio action: {e}")
+            self.dialogs.show_message(f"Audio action error: {e}", type="error")
+    
+    def _start_enhanced_media_player(self, file_path):
+        """Start enhanced media player for audio file"""
+        try:
+            # Get all audio files in directory for playlist
+            directory = os.path.dirname(file_path)
+            audio_extensions = ['.mp3', '.flac', '.wav', '.aac', '.ogg', '.m4a', '.wma', '.ac3', '.dts']
+            audio_files = []
+            
+            for f in os.listdir(directory):
+                full_path = os.path.join(directory, f)
+                if os.path.isfile(full_path):
+                    ext = os.path.splitext(f)[1].lower()
+                    if ext in audio_extensions:
+                        audio_files.append(full_path)
+            
+            # Sort files
+            audio_files.sort()
+            
+            # Start the enhanced media player
+            try:
+                from .media_player import MediaPlayer
+                self.main.session.open(MediaPlayer, file_path, audio_files)
+                logger.info(f"Started enhanced MediaPlayer with {len(audio_files)} tracks")
+            except ImportError as e:
+                logger.warning(f"MediaPlayer not available: {e}")
+                # Fallback to standard playback
+                self.main._play_single_audio(file_path)
+                self.dialogs.show_message(
+                    "Enhanced MediaPlayer not available.\n\nUsing standard playback.",
+                    type="info",
+                    timeout=3
+                )
+                
+        except Exception as e:
+            logger.error(f"Error starting enhanced media player: {e}")
+            self.dialogs.show_message(f"Media player error: {e}", type="error")
+    
+    def _create_audio_playlist(self, file_path):
+        """Create and play audio playlist"""
+        try:
+            directory = os.path.dirname(file_path)
+            
+            # Get all audio files
+            audio_extensions = ['.mp3', '.flac', '.wav', '.aac', '.ogg', '.m4a', '.wma', '.ac3', '.dts']
+            audio_files = []
+            
+            for f in os.listdir(directory):
+                full_path = os.path.join(directory, f)
+                if os.path.isfile(full_path):
+                    ext = os.path.splitext(f)[1].lower()
+                    if ext in audio_extensions:
+                        audio_files.append(full_path)
+            
+            if not audio_files:
+                self.dialogs.show_message("No audio files found in this directory", type="info")
+                return
+            
+            # Sort files
+            audio_files.sort()
+            
+            # Reorder to start with current file
+            try:
+                start_index = audio_files.index(file_path)
+                audio_files = audio_files[start_index:] + audio_files[:start_index]
+            except ValueError:
+                pass  # Current file not in list (shouldn't happen)
+            
+            # Start playlist with MediaPlayer
+            self._start_audio_playlist(audio_files)
+            
+        except Exception as e:
+            logger.error(f"Error creating audio playlist: {e}")
+            self.dialogs.show_message(f"Playlist error: {e}", type="error")
+    
+    def _start_audio_playlist(self, audio_files):
+        """Start playing audio playlist"""
+        try:
+            # Start the enhanced media player
+            try:
+                from .media_player import MediaPlayer
+                self.main.session.open(MediaPlayer, audio_files[0], audio_files)
+                logger.info(f"Started audio playlist with {len(audio_files)} tracks")
+            except ImportError as e:
+                logger.warning(f"MediaPlayer not available: {e}")
+                # Fallback to simple playback
+                self.dialogs.show_message(
+                    "Advanced media player not available.\n\n"
+                    "Using basic playback instead.",
+                    type="info",
+                    timeout=3
+                )
+                # Play first file with basic player
+                if hasattr(self.main, '_play_single_audio'):
+                    self.main._play_single_audio(audio_files[0])
+                else:
+                    # Ultimate fallback
+                    import subprocess
+                    subprocess.Popen(['gst-launch-1.0', 'playbin', 'uri=file://' + audio_files[0]])
+                    
+        except Exception as e:
+            logger.error(f"Error starting audio playlist: {e}")
+            self.dialogs.show_message(f"Playback error: {e}", type="error")
     
     def _show_image_menu(self, file_path, filename):
         """Context menu for image files"""

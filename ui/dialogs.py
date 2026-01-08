@@ -521,11 +521,38 @@ class Dialogs:
             logger.error(f"Error previewing binary file: {e}")
             self.show_message("Cannot preview file: " + str(e), type="error")
     
+    # UPDATED: Enhanced media preview with MediaPlayer support
     def preview_media(self, file_path, config):
-        """Preview media file"""
+        """Preview media file with enhanced player"""
         try:
+            # Check if it's an audio file for playlist option
+            ext = os.path.splitext(file_path)[1].lower()
+            audio_extensions = ['.mp3', '.flac', '.wav', '.aac', '.ogg', '.m4a', '.wma', '.ac3', '.dts']
+            
+            # Try to use MediaPlayer if available
+            try:
+                # First check if MediaPlayer is available
+                try:
+                    from .media_player import MediaPlayer
+                    # Open MediaPlayer with the file
+                    self.session.open(MediaPlayer, file_path)
+                    return
+                except ImportError as e:
+                    logger.warning(f"MediaPlayer not available: {e}")
+                    # Fall through to standard handling
+            except Exception as e:
+                logger.error(f"Error importing MediaPlayer: {e}")
+            
+            # Fallback to standard media preview
             info = "Media File: " + os.path.basename(file_path) + "\n\n"
             info += "Path: " + file_path + "\n\n"
+            
+            if ext in audio_extensions:
+                info += "🎵 Audio file detected\n"
+                info += "Use OK button in main screen for enhanced audio options\n\n"
+            else:
+                info += "🎬 Video file\n"
+            
             info += "Media playback would start here.\n"
             info += "Press PLAY button to play with external player."
             
