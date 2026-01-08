@@ -178,6 +178,12 @@ class PilotFSMain(Screen):
         
         # Track marked files for color changes
         self.marked_files = set()
+        
+        # NEW: Audio playback flags
+        self.in_media_playback = False
+        self.in_playlist_mode = False
+        self.audio_playlist = None
+        self.current_playlist_index = 0
 
     def setup_actions(self):
         """Setup key mappings"""
@@ -186,7 +192,7 @@ class PilotFSMain(Screen):
             "MenuActions", "NumberActions", "ChannelSelectBaseActions"
         ], {
             "ok": self.ok_pressed,
-            "cancel": self.close_plugin,
+            "cancel": self.keyCancel,  # CHANGED: Use keyCancel for media exit handling
             "up": self.up,
             "down": self.down,
             "left": self.focus_left,
@@ -972,48 +978,177 @@ class PilotFSMain(Screen):
             logger.error(f"Error previewing file: {e}")
             self.show_error("Preview", e)
 
+    # NEW: ENHANCED MEDIA PREVIEW WITH AUDIO OPTIONS
     def preview_media(self):
-        """Preview media file - IMPROVED with proper playback"""
+        """Play media file with enhanced audio options"""
         try:
-            if self.preview_in_progress:
-                self.dialogs.show_message("Media preview already in progress!", type="warning")
+            selection = self.active_pane.getSelection()
+            if not selection or not selection[0]:
                 return
             
-            sel = self.active_pane.getSelection()
-            if not sel or not sel[0]:
-                return
+            file_path = selection[0]
             
-            file_path = sel[0]
+            # Check if it's an audio file
+            ext = os.path.splitext(file_path)[1].lower()
+            audio_extensions = ['.mp3', '.flac', '.wav', '.aac', '.ogg', '.m4a', '.wma', '.ac3', '.dts']
             
-            # Check if file can be played
-            if not self.can_play_file(file_path):
-                self.dialogs.show_message(
-                    "Not a playable media file!\n\nSupported: MP4, MKV, AVI, TS, MP3, FLAC, etc.",
-                    type="info"
-                )
-                return
-            
-            self.preview_in_progress = True
-            
-            # Try to play using Enigma2 service
-            if self.config.plugins.pilotfs.use_internal_player.value:
-                try:
-                    self.play_media_file(file_path)
-                except Exception as e:
-                    logger.error(f"Internal player failed: {e}")
-                    if self.config.plugins.pilotfs.fallback_to_external.value:
-                        self.play_with_external_player(file_path)
-                    else:
-                        self.dialogs.show_message(f"Media playback failed:\n{e}", type="error")
+            if ext in audio_extensions:
+                # Show enhanced audio options
+                self._show_audio_options(file_path)
             else:
-                self.play_with_external_player(file_path)
+                # For video/images, use existing preview
+                if hasattr(self.dialogs, 'preview_media'):
+                    self.dialogs.preview_media(file_path, self.config)
+                else:
+                    # Fallback to original method
+                    self._default_media_preview(file_path)
+                    
+        except Exception as e:
+            logger.error(f"Error in preview_media: {e}")
+            self.dialogs.show_message(f"Media error: {e}", type="error")
+
+    def _show_audio_options(self, file_path):
+        """Show enhanced audio options dialog"""
+        try:
+            from Screens.ChoiceBox import ChoiceBox
             
-            self.preview_in_progress = False
+            filename = os.path.basename(file_path)
+            
+            # Create the menu you requested
+            menu_items = [
+                ("Cancel", None),
+                ("Play the audio file", "play_single"),
+                ("Play all audio files in the directory", "play_all")
+            ]
+            
+            self.session.openWithCallback(
+                lambda choice: self._handle_audio_option(choice, file_path) if choice else None,
+                ChoiceBox,
+                title=f"What would you like to do with {filename}?",
+                list=menu_items
+            )
             
         except Exception as e:
-            logger.error(f"Error previewing media: {e}")
-            self.preview_in_progress = False
-            self.show_error("Media preview", e)
+            logger.error(f"Error showing audio options: {e}")
+            self.dialogs.show_message(f"Audio options error: {e}", type="error")
+
+    def _handle_audio_option(self, choice, file_path):
+        """Handle audio option selection"""
+        if not choice or not choice[1]:
+            return
+        
+        action = choice[1]
+        
+        try:
+            if action == "play_single":
+                self._play_single_audio(file_path)
+            elif action == "play_all":
+                self._play_all_audio_in_directory(file_path)
+        except Exception as e:
+            logger.error(f"Error handling audio option: {e}")
+            self.dialogs.show_message(f"Audio action error: {e}", type="error")
+
+    def _play_single_audio(self, file_path):
+        """Play single audio file"""
+        try:
+            # Set flag for exit confirmation
+            self.in_media_playback = True
+            
+            # Show playback message
+            self.dialogs.show_message(
+                f"🎵 Playing: {os.path.basename(file_path)}\n\n"
+                f"Press EXIT for exit options",
+                type="info",
+                timeout=3
+            )
+            
+            # Start playback using existing media player
+            self.play_media_file(file_path)
+            
+        except Exception as e:
+            logger.error(f"Error playing audio: {e}")
+            self.dialogs.show_message(f"Playback error: {e}", type="error")
+
+    def _play_all_audio_in_directory(self, file_path):
+        """Play all audio files in directory"""
+        try:
+            directory = os.path.dirname(file_path)
+            
+            # Get all audio files
+            audio_extensions = ['.mp3', '.flac', '.wav', '.aac', '.ogg', '.m4a', '.wma', '.ac3', '.dts']
+            audio_files = []
+            
+            for f in os.listdir(directory):
+                full_path = os.path.join(directory, f)
+                if os.path.isfile(full_path):
+                    ext = os.path.splitext(f)[1].lower()
+                    if ext in audio_extensions:
+                        audio_files.append(full_path)
+            
+            if not audio_files:
+                self.dialogs.show_message("No audio files found in this directory", type="info")
+                return
+            
+            # Sort and reorder to start with current file
+            audio_files.sort()
+            try:
+                start_index = audio_files.index(file_path)
+                audio_files = audio_files[start_index:] + audio_files[:start_index]
+            except ValueError:
+                pass  # Current file not in list (shouldn't happen)
+            
+            # Start playlist
+            self.audio_playlist = audio_files
+            self.current_playlist_index = 0
+            self.in_media_playback = True
+            self.in_playlist_mode = True
+            
+            # Show playlist info
+            self.dialogs.show_message(
+                f"🎵 Playing {len(audio_files)} audio files\n\n"
+                f"Starting with: {os.path.basename(file_path)}\n\n"
+                f"Press EXIT for exit options",
+                type="info",
+                timeout=4
+            )
+            
+            # Start first file
+            self._play_single_audio(audio_files[0])
+            
+        except Exception as e:
+            logger.error(f"Error creating playlist: {e}")
+            self.dialogs.show_message(f"Playlist error: {e}", type="error")
+
+    def _default_media_preview(self, file_path):
+        """Original media preview fallback"""
+        if self.preview_in_progress:
+            self.dialogs.show_message("Media preview already in progress!", type="warning")
+            return
+        
+        # Check if file can be played
+        if not self.can_play_file(file_path):
+            self.dialogs.show_message(
+                "Not a playable media file!\n\nSupported: MP4, MKV, AVI, TS, MP3, FLAC, etc.",
+                type="info"
+            )
+            return
+        
+        self.preview_in_progress = True
+        
+        # Try to play using Enigma2 service
+        if self.config.plugins.pilotfs.use_internal_player.value:
+            try:
+                self.play_media_file(file_path)
+            except Exception as e:
+                logger.error(f"Internal player failed: {e}")
+                if self.config.plugins.pilotfs.fallback_to_external.value:
+                    self.play_with_external_player(file_path)
+                else:
+                    self.dialogs.show_message(f"Media playback failed:\n{e}", type="error")
+        else:
+            self.play_with_external_player(file_path)
+        
+        self.preview_in_progress = False
 
     def can_play_file(self, path):
         """Check if file can be played"""
@@ -1261,6 +1396,28 @@ class PilotFSMain(Screen):
         """Callback when movie player closes - return to plugin"""
         logger.info("Movie player closed, returning to plugin")
         self.preview_in_progress = False
+        
+        # NEW: Handle playlist continuation
+        if self.in_playlist_mode and self.audio_playlist:
+            self.current_playlist_index += 1
+            if self.current_playlist_index < len(self.audio_playlist):
+                # Play next file in playlist
+                next_file = self.audio_playlist[self.current_playlist_index]
+                self.dialogs.show_message(
+                    f"🎵 Next: {os.path.basename(next_file)}\n\n"
+                    f"Track {self.current_playlist_index + 1} of {len(self.audio_playlist)}",
+                    type="info",
+                    timeout=2
+                )
+                self._play_single_audio(next_file)
+            else:
+                # End of playlist
+                self.in_playlist_mode = False
+                self.audio_playlist = None
+                self.current_playlist_index = 0
+                self.dialogs.show_message("🎵 Playlist complete", type="info", timeout=2)
+        
+        self.in_media_playback = False
         # Refresh the current view
         self.update_ui()
 
@@ -1326,6 +1483,50 @@ class PilotFSMain(Screen):
         
         threading.Thread(target=play_thread, daemon=True).start()
 
+    # NEW: EXIT KEY HANDLING WITH MEDIA CONFIRMATION
+    def keyCancel(self):
+        """Handle EXIT key with media confirmation"""
+        try:
+            # Check if we're in media playback
+            if getattr(self, 'in_media_playback', False):
+                # Show exit confirmation
+                message = "Exit media player?"
+                if getattr(self, 'in_playlist_mode', False):
+                    message = "Exit media player?\n\nStop playing playlist and exit?"
+                
+                from Screens.MessageBox import MessageBox
+                self.session.openWithCallback(
+                    self._handle_media_exit_confirmation,
+                    MessageBox,
+                    message,
+                    MessageBox.TYPE_YESNO
+                )
+            else:
+                # Normal exit - use your existing close method
+                self.close_plugin()
+                
+        except Exception as e:
+            logger.error(f"Error in keyCancel: {e}")
+            self.close_plugin()
+
+    def _handle_media_exit_confirmation(self, confirmed):
+        """Handle exit confirmation result"""
+        if confirmed:
+            # Exit media mode
+            self.in_media_playback = False
+            self.in_playlist_mode = False
+            
+            # Clear playlist if exists
+            if hasattr(self, 'audio_playlist'):
+                self.audio_playlist = None
+                self.current_playlist_index = 0
+            
+            # Show confirmation
+            self.dialogs.show_message("Media playback stopped", type="info", timeout=2)
+        else:
+            # Stay in media playback
+            self.dialogs.show_message("Playback continues...", type="info", timeout=1)
+
     def refresh_panes(self):
         """Refresh both panes"""
         try:
@@ -1359,6 +1560,12 @@ class PilotFSMain(Screen):
             # Clear clipboard to free memory
             self.clipboard.clear()
             self.marked_files.clear()
+            
+            # Clear audio playback state
+            self.in_media_playback = False
+            self.in_playlist_mode = False
+            self.audio_playlist = None
+            self.current_playlist_index = 0
             
             # Cancel any pending operations
             with self.operation_lock:
