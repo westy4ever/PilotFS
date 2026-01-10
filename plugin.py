@@ -8,6 +8,14 @@ Enhanced with Smart Context Menus & Remote Access
 import sys
 import traceback
 
+# Enigma2 Player
+try:
+    from .player.enigma_player import PilotFSPlayer, PLAYER_AVAILABLE
+except ImportError:
+    PilotFSPlayer = None
+    PLAYER_AVAILABLE = False
+
+
 # ===== ENIGMA2 IMPORTS =====
 try:
     from Plugins.Plugin import PluginDescriptor  # <-- CRITICAL: This was missing!

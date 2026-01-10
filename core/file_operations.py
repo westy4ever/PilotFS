@@ -26,8 +26,8 @@ class FileOperations:
     def copy(self, source, destination, overwrite=False):
         """Copy file or directory"""
         try:
-            validate_path(source)
-            validate_path(destination)
+            validate_path(source, allow_root=True)
+            validate_path(destination, allow_root=True)
             
             if not os.path.exists(source):
                 raise FileOperationError(f"Source does not exist: {source}")
@@ -77,8 +77,8 @@ class FileOperations:
     def move(self, source, destination, use_trash=False):
         """Move file or directory"""
         try:
-            validate_path(source)
-            validate_path(destination)
+            validate_path(source, allow_root=True)
+            validate_path(destination, allow_root=True)
             
             if not os.path.exists(source):
                 raise FileOperationError(f"Source does not exist: {source}")
@@ -125,7 +125,7 @@ class FileOperations:
     def delete(self, path, permanent=False):
         """Delete file or directory"""
         try:
-            validate_path(path)
+            validate_path(path, allow_root=True)
             
             if not os.path.exists(path):
                 raise FileOperationError(f"Path does not exist: {path}")
@@ -157,7 +157,7 @@ class FileOperations:
     def rename(self, old_path, new_name):
         """Rename file or directory"""
         try:
-            validate_path(old_path)
+            validate_path(old_path, allow_root=True)
             
             if not os.path.exists(old_path):
                 raise FileOperationError(f"Path does not exist: {old_path}")
@@ -186,7 +186,7 @@ class FileOperations:
     def create_directory(self, path, name):
         """Create new directory"""
         try:
-            validate_path(path)
+            validate_path(path, allow_root=True)
             
             new_path = os.path.join(path, name)
             
@@ -202,7 +202,7 @@ class FileOperations:
     def create_file(self, path, name, content=""):
         """Create new file"""
         try:
-            validate_path(path)
+            validate_path(path, allow_root=True)
             
             new_path = os.path.join(path, name)
             
@@ -282,7 +282,7 @@ class FileOperations:
     def change_permissions(self, path, mode):
         """Change file permissions"""
         try:
-            validate_path(path)
+            validate_path(path, allow_root=True)
             
             if not os.path.exists(path):
                 raise FileOperationError(f"Path does not exist: {path}")

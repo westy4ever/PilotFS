@@ -2,13 +2,15 @@ from Screens.Screen import Screen
 from Screens.MessageBox import MessageBox
 from Screens.VirtualKeyBoard import VirtualKeyBoard
 from Components.ActionMap import ActionMap
-from Components.FileList import FileList
+from Components.FileList import FileList as OriginalFileList
 from Components.Label import Label
 from Components.ProgressBar import ProgressBar
 from enigma import getDesktop, eTimer, eLabel, gFont, gRGB, RT_HALIGN_LEFT, RT_VALIGN_CENTER
+from Tools.Directories import fileExists
 import threading
 import os
 import time
+import stat
 
 from ..core.config import PilotFSConfig
 from ..core.file_operations import FileOperations
@@ -21,9 +23,108 @@ from ..utils.logging_config import get_logger
 from .context_menu import ContextMenuHandler
 from .dialogs import Dialogs
 
-
 logger = get_logger(__name__)
 
+# ==============================================
+# CUSTOM FILELIST CLASS - Override for root access
+# ==============================================
+class RootFileList(OriginalFileList):
+    """Custom FileList that allows navigation to root directory"""
+    
+    def __init__(self, path, **kwargs):
+        # Force disable all inhibition for root access
+        kwargs['inhibitDirs'] = False
+        kwargs['inhibitMounts'] = False
+        kwargs['showMountpoints'] = True
+        
+        # Call parent constructor
+        super().__init__(path, **kwargs)
+        
+        # Force enable root navigation
+        self._force_root_access = True
+    
+    def getParentDirectory(self):
+        """Always allow getting parent directory"""
+        current = self.getCurrentDirectory()
+        if not current:
+            return None
+        
+        # If we're at root, return None (no parent)
+        if current == "/":
+            return None
+        
+        # Get parent directory
+        parent = os.path.dirname(current.rstrip('/'))
+        
+        # If parent is empty, return root
+        if not parent:
+            parent = "/"
+        
+        return parent
+    
+    def canDescent(self, directory):
+        """Always allow descent to any accessible directory"""
+        if not directory:
+            return False
+        
+        # Special handling for root
+        if directory == "/":
+            return True
+        
+        # Check if directory exists and is readable
+        try:
+            return os.path.isdir(directory) and os.access(directory, os.R_OK)
+        except:
+            return False
+    
+    def changeDir(self, directory, *args, **kwargs):
+        """Override to allow changing to any directory"""
+        if not directory:
+            return False
+        
+        # Normalize the directory path
+        if directory.endswith('/') and len(directory) > 1:
+            directory = directory.rstrip('/')
+        
+        # Check if we can access this directory
+        if not self.canDescent(directory):
+            logger.warning(f"Cannot descent to directory: {directory}")
+            return False
+        
+        try:
+            # Use parent implementation
+            return super().changeDir(directory, *args, **kwargs)
+        except Exception as e:
+            logger.error(f"Error changing directory to {directory}: {e}")
+            
+            # Try alternative method
+            try:
+                self.current_directory = directory
+                self.refresh()
+                return True
+            except Exception as e2:
+                logger.error(f"Alternative method also failed: {e2}")
+                return False
+    
+    def goUp(self):
+        """Go to parent directory"""
+        parent = self.getParentDirectory()
+        if parent:
+            return self.changeDir(parent)
+        return False
+    
+    def refresh(self):
+        """Refresh directory listing"""
+        try:
+            super().refresh()
+            return True
+        except Exception as e:
+            logger.error(f"Refresh error: {e}")
+            return False
+
+# ==============================================
+# MAIN SCREEN CLASS
+# ==============================================
 class PilotFSMain(Screen):
     def __init__(self, session):
         Screen.__init__(self, session)
@@ -124,9 +225,23 @@ class PilotFSMain(Screen):
         left_path = self.config.plugins.pilotfs.left_path.value
         right_path = self.config.plugins.pilotfs.right_path.value
         
-        # Create FileLists with proper color handling
-        self["left_pane"] = FileList(left_path, showDirectories=True, showFiles=True)
-        self["right_pane"] = FileList(right_path, showDirectories=True, showFiles=True)
+        # Create custom RootFileList instances with proper parameters
+        self["left_pane"] = RootFileList(
+            left_path, 
+            showDirectories=True, 
+            showFiles=True,
+            inhibitDirs=False,
+            inhibitMounts=False,
+            showMountpoints=True
+        )
+        self["right_pane"] = RootFileList(
+            right_path, 
+            showDirectories=True, 
+            showFiles=True,
+            inhibitDirs=False,
+            inhibitMounts=False,
+            showMountpoints=True
+        )
         self["left_pane"].useSelection = True
         self["right_pane"].useSelection = True
         
@@ -250,11 +365,17 @@ class PilotFSMain(Screen):
         # Check paths exist
         left_path = self.config.plugins.pilotfs.left_path.value
         if not os.path.isdir(left_path):
-            issues.append(f"Left path not found: {left_path}")
+            # Try to use root if path doesn't exist
+            left_path = "/"
+            self.config.plugins.pilotfs.left_path.value = left_path
+            issues.append(f"Left path not found, using root: {left_path}")
         
         right_path = self.config.plugins.pilotfs.right_path.value
         if not os.path.isdir(right_path):
-            issues.append(f"Right path not found: {right_path}")
+            # Try to use root if path doesn't exist
+            right_path = "/"
+            self.config.plugins.pilotfs.right_path.value = right_path
+            issues.append(f"Right path not found, using root: {right_path}")
         
         if issues:
             logger.warning(f"Config issues: {issues}")
@@ -414,67 +535,72 @@ class PilotFSMain(Screen):
             help_text = "OK:Play/Open 0:Ctx 1-9:BMark CH±:Sort MENU:Tools"
         self["help_text"].setText(help_text)
 
-    # OK Button Long Press Detection
     def ok_pressed(self):
-        """Handle OK button press - SIMPLE NAVIGATION"""
-        # Long press disabled - always navigate immediately
-        self.execute_ok_navigation()
-
-    def execute_ok_navigation(self):
-        """Execute navigation - PERFECT SMART BEHAVIOR"""
+        """Handle OK button press - navigate or play"""
         try:
-            sel = self.active_pane.getSelection()
+            # Get active pane (left or right)
+            pane = self.active_pane
+            
+            # Get current selection
+            sel = pane.getSelection()
             if not sel or not sel[0]:
                 return
             
             path = sel[0]
+            print(f"[PilotFS] OK pressed on: {path}")
             
+            # Check if it's a directory
             if os.path.isdir(path):
                 # Folders: Enter directory
-                self.active_pane.changeDir(path)
-                self.update_ui()
-            else:
-                # Files: Smart behavior based on type
-                ext = os.path.splitext(path)[1].lower()
-                
-                # === PLAY DIRECTLY (NO MENU) ===
-                # Video files: PLAY
-                if ext in ['.mp4', '.mkv', '.avi', '.ts', '.m2ts', '.mov', '.m4v', '.mpg', '.mpeg', '.wmv', '.flv']:
-                    self.preview_media()
-                
-                # Audio files: PLAY
-                elif ext in ['.mp3', '.flac', '.wav', '.aac', '.ogg', '.m4a', '.wma', '.ac3', '.dts']:
-                    self.preview_media()
-                
-                # === SHOW SMART CONTEXT MENU ===
-                # Script files: Show menu (Run/View/Edit)
-                elif ext in ['.sh', '.py', '.pl']:
-                    self.context_menu.show_smart_context_menu(path)
-                
-                # Archive files: Show menu (Extract/View)
-                elif ext in ['.zip', '.tar', '.tar.gz', '.tgz', '.rar', '.7z', '.gz']:
-                    self.context_menu.show_smart_context_menu(path)
-                
-                # IPK packages: Show menu (Install/View)
-                elif ext == '.ipk':
-                    self.context_menu.show_smart_context_menu(path)
-                
-                # === PREVIEW DIRECTLY ===
-                # Text files: Preview
-                elif ext in ['.txt', '.log', '.conf', '.cfg', '.ini', '.xml', '.json', '.md']:
-                    self.preview_file()
-                
-                # Image files: Preview
-                elif ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff']:
-                    self.dialogs.preview_image(path, self.file_ops)
-                
-                # Default: Show file info
+                if pane.canDescent(path):
+                    pane.changeDir(path)
+                    self.update_ui()
+                    self.update_help_text()
+                    self["status_bar"].setText(f"Entered: {os.path.basename(path)}")
                 else:
-                    self.show_file_info()
+                    self["status_bar"].setText(f"Cannot access: {os.path.basename(path)}")
+                return
+            
+            # It's a file - check what type
+            if os.path.exists(path):
+                # Check if it's a media file
+                try:
+                    from ..player.enigma_player import is_media_file, PilotFSPlayer
                     
+                    if is_media_file(path):
+                        print(f"[PilotFS] Opening media file: {os.path.basename(path)}")
+                        self["status_bar"].setText(f"Opening: {os.path.basename(path)}")
+                        
+                        # Open the player
+                        self.session.open(PilotFSPlayer, path, parent_screen=self)
+                        return
+                except ImportError as e:
+                    print(f"[PilotFS] Could not import player: {e}")
+                
+                # Check if it's an image file
+                try:
+                    from .image_viewer import is_image_file, PilotFSImageViewer
+                    
+                    if is_image_file(path):
+                        print(f"[PilotFS] Opening image: {os.path.basename(path)}")
+                        self["status_bar"].setText(f"Opening image: {os.path.basename(path)}")
+                        
+                        # Open the image viewer
+                        self.session.open(PilotFSImageViewer, path, parent_screen=self)
+                        return
+                except ImportError as e:
+                    print(f"[PilotFS] Could not import image viewer: {e}")
+                
+                # For other files, toggle selection
+                self.toggle_selection()
+            else:
+                self["status_bar"].setText("File not found")
+                
         except Exception as e:
-            logger.error(f"Error in OK navigation: {e}")
-            self.show_error("Navigation", e)
+            print(f"[PilotFS ERROR] Navigation failed: {e}")
+            import traceback
+            traceback.print_exc()
+            self["status_bar"].setText(f"Error: {str(e)[:30]}")
 
     def up(self):
         """Move up in file list"""
@@ -1134,7 +1260,7 @@ class PilotFSMain(Screen):
             self.apply_sorting()
             self.update_ui()
             self.dialogs.show_message(f"Sort: {self.left_sort_mode if self.active_pane == self['left_pane'] else self.right_sort_mode.upper()}", 
-                                     type="info", timeout=1)
+                                    type="info", timeout=1)
         except Exception as e:
             logger.error(f"Error in next sort: {e}")
 
@@ -1157,7 +1283,7 @@ class PilotFSMain(Screen):
             self.apply_sorting()
             self.update_ui()
             self.dialogs.show_message(f"Sort: {self.left_sort_mode if self.active_pane == self['left_pane'] else self.right_sort_mode.upper()}", 
-                                     type="info", timeout=1)
+                                    type="info", timeout=1)
         except Exception as e:
             logger.error(f"Error in prev sort: {e}")
 
@@ -1423,3 +1549,33 @@ class PilotFSMain(Screen):
         except Exception as e:
             logger.error(f"Error deleting multiple items: {e}")
             self.dialogs.show_message(f"Delete multiple failed: {e}", type="error")
+
+    # ENIGMA2 PLAYER
+    def play_with_enigma_player(self):
+        try:
+            sel = self.active_pane.getSelection()
+            if not sel or not sel[0]:
+                return
+            file_path = sel[0]
+
+            import os
+            ext = os.path.splitext(file_path)[1].lower()
+            video_exts = ['.mp4', '.mkv', '.avi', '.ts', '.mov']
+            audio_exts = ['.mp3', '.flac', '.wav', '.aac']
+            if ext not in video_exts and ext not in audio_exts:
+                return
+
+            try:
+                from ..player.enigma_player import PilotFSPlayer, PLAYER_AVAILABLE
+                if not PLAYER_AVAILABLE or PilotFSPlayer is None:
+                    self["status_bar"].setText("Player not available")
+                    return
+            except ImportError:
+                self["status_bar"].setText("Player module not found")
+                return
+
+            self.session.open(PilotFSPlayer, file_path, parent_screen=self)
+            self["status_bar"].setText(f"Playing: {os.path.basename(file_path)}")
+
+        except Exception as e:
+            print(f"Player error: {e}")

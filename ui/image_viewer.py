@@ -170,3 +170,13 @@ class ImageViewer(Screen):
     def key_exit(self):
         """Exit viewer"""
         self.close()
+
+def is_image_file(file_path):
+    """Check if file is an image."""
+    if not file_path or not isinstance(file_path, str):
+        return False
+    
+    ext = os.path.splitext(file_path)[1].lower()
+    image_exts = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp']
+    
+    return ext in image_exts

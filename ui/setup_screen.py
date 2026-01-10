@@ -269,6 +269,11 @@ class PilotFSSetup(ConfigListScreen, Screen):
     def key_save(self):
         """Save configuration"""
         try:
+            # Apply changes from ConfigListScreen first
+            for x in self["config"].list:
+                x[1].save()
+            
+            # Then save all items
             for item in self.list:
                 if hasattr(item[1], 'save'):
                     item[1].save()

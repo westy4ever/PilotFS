@@ -159,6 +159,24 @@ class PilotFSConfig:
         
         if not hasattr(config.plugins.pilotfs, 'webdav_pass'):
             config.plugins.pilotfs.webdav_pass = ConfigText(default="", fixed_size=False)
+
+        # Root Navigation - ADDED BY FIX SCRIPT
+        if not hasattr(config.plugins.pilotfs, 'allow_root_navigation'):
+            config.plugins.pilotfs.allow_root_navigation = ConfigYesNo(default=True)
+        
+        if not hasattr(config.plugins.pilotfs, 'show_parent_dir'):
+            config.plugins.pilotfs.show_parent_dir = ConfigYesNo(default=True)
+        
+        if not hasattr(config.plugins.pilotfs, 'navigation_restriction'):
+            config.plugins.pilotfs.navigation_restriction = ConfigSelection(
+                default="none", 
+                choices=[
+                    ("none", "No Restriction - Full Access"),
+                    ("media_only", "Media Folders Only (/media)"),
+                    ("safe_mode", "Safe Mode (No System Folders)")
+                ]
+            )
+
     
     def load_bookmarks(self):
         """Load bookmarks from file with validation"""

@@ -176,6 +176,17 @@ class ContextMenuHandler:
                 ext = os.path.splitext(item_path)[1].lower()
                 if ext in ['.mp4', '.mkv', '.avi', '.ts', '.mp3', '.flac']:
                     menu_items.append(("🎬 Play Media", "play"))
+
+                    # Enigma2 Player
+                    try:
+                        from ..player.enigma_player import PLAYER_AVAILABLE
+                        if PLAYER_AVAILABLE:
+                            menu_items.append(
+                                ("Play with Enigma2 Player",
+                                 lambda: self.parent.play_with_enigma_player())
+                            )
+                    except ImportError:
+                        pass
                 if ext in ['.txt', '.log', '.conf', '.py', '.sh', '.xml', '.json']:
                     menu_items.append(("📝 Edit Text", "edit"))
                 if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp']:
@@ -1658,6 +1669,34 @@ class ContextMenuHandler:
             logger.error(f"Error showing audio menu: {e}")
             self.dialogs.show_message(f"Audio menu error: {e}", type="error")
     
+
+    def _handle_audio_action(self, choice, file_path, filename, audio_files_in_dir):
+        """Handle audio menu action"""
+        action = choice[1]
+        
+        try:
+            if action == "play_single":
+                # Play single file
+                self.main.play_audio_file(file_path)
+            
+            elif action == "play_all":
+                # Play all audio files in directory as playlist
+                if len(audio_files_in_dir) > 1:
+                    self.main.play_audio_playlist(audio_files_in_dir, file_path)
+                else:
+                    self.main.play_audio_file(file_path)
+            
+            elif action == "info":
+                self.main.show_file_info()
+            
+            elif action == "copy_other":
+                self.copy_to_other_pane(file_path)
+                
+        except Exception as e:
+            logger.error(f"Error handling audio action: {e}")
+            self.dialogs.show_message(f"Audio action error: {e}", type="error")
+
+
     def _show_image_menu(self, file_path, filename):
         """Context menu for image files"""
         try:

@@ -2,9 +2,9 @@ import os
 import re
 import shlex
 
-def validate_path(path, must_exist=False, must_be_dir=False, must_be_file=False, is_filename=False):
+def validate_path(path, must_exist=False, must_be_dir=False, must_be_file=False, is_filename=False, allow_root=True):
     """
-    Validate file path with enhanced security
+    Validate file path with enhanced security and root navigation support
     
     Args:
         path: Path to validate
@@ -12,6 +12,7 @@ def validate_path(path, must_exist=False, must_be_dir=False, must_be_file=False,
         must_be_dir: If True, path must be a directory
         must_be_file: If True, path must be a file
         is_filename: If True, validate as filename only (no path)
+        allow_root: If True, allow navigation to root and storage devices
     
     Returns:
         bool: True if path is valid
@@ -47,30 +48,50 @@ def validate_path(path, must_exist=False, must_be_dir=False, must_be_file=False,
     except (ValueError, OSError):
         return False
     
-    # Define allowed base directories
-    allowed_bases = [
-        '/media', '/tmp', '/home', '/var/volatile',
-        '/usr/lib/enigma2/python/Plugins'
-    ]
+    # NAVIGATION FIX: Allow root navigation when enabled
+    if allow_root:
+        # Allow common storage and system directories
+        allowed_bases = [
+            '/',  # Root - allows navigation to all storage
+            '/media', '/tmp', '/home', '/var', '/mnt',
+            '/usr/lib/enigma2/python/Plugins',
+            '/etc/enigma2',
+            '/hdd', '/autofs'
+        ]
+    else:
+        # Restricted mode - only media folders
+        allowed_bases = [
+            '/media', '/tmp', '/home', '/var/volatile',
+            '/usr/lib/enigma2/python/Plugins'
+        ]
     
-    # Check if path starts with allowed base (unless checking system paths)
-    if not path.startswith('/etc/enigma2'):  # Allow Enigma2 config
-        if not any(normalized.startswith(base) for base in allowed_bases):
-            # Additional check: allow if it's under current working directory
-            try:
-                cwd = os.getcwd()
-                if not normalized.startswith(cwd):
-                    return False
-            except:
-                return False
+    # Check if path starts with allowed base
+    path_allowed = False
+    for base in allowed_bases:
+        if normalized.startswith(base) or normalized == base.rstrip('/'):
+            path_allowed = True
+            break
+    
+    if not path_allowed:
+        # Additional check: allow if it's under current working directory
+        try:
+            cwd = os.getcwd()
+            if normalized.startswith(cwd):
+                path_allowed = True
+        except:
+            pass
+    
+    if not path_allowed:
+        return False
     
     # Prevent access to sensitive system files
     forbidden_paths = [
         '/etc/passwd', '/etc/shadow', '/etc/sudoers',
-        '/root/.ssh', '/etc/ssh'
+        '/root/.ssh', '/etc/ssh/ssh_host'
     ]
-    if any(normalized.startswith(forbidden) for forbidden in forbidden_paths):
-        return False
+    for forbidden in forbidden_paths:
+        if normalized.startswith(forbidden):
+            return False
     
     # Check if path exists if required
     if must_exist and not os.path.exists(path):
@@ -85,6 +106,7 @@ def validate_path(path, must_exist=False, must_be_dir=False, must_be_file=False,
         return False
     
     return True
+
 
 def validate_ip(ip_address):
     """Validate IP address (IPv4)"""
