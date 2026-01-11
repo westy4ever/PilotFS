@@ -82,6 +82,11 @@ def main(session, **kwargs):
     logger.info("Python %s on %s" % (sys.version, sys.platform))
     
     try:
+        # Initialize config to ensure all settings (like save_left_on_exit) are registered
+        from Plugins.Extensions.PilotFS.core.config import PilotFSConfig
+        config_manager = PilotFSConfig()
+        config_manager.setup_config()
+        
         # Try to import main screen
         logger.info("Attempting to import PilotFSMain...")
         

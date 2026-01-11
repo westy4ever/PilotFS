@@ -70,6 +70,14 @@ class ImageViewer(Screen):
         # Load image
         self.onLayoutFinish.append(self.load_image)
     
+    def __del__(self):
+        """Clean up the callback to prevent crashes on close"""
+        try:
+            if self.update_image in self.picload.PictureData.get():
+                self.picload.PictureData.get().remove(self.update_image)
+        except Exception as e:
+            logger.debug("Error in ImageViewer cleanup: %s" % str(e))
+            
     def get_image_list(self, image_path, image_list, directory):
         """Get list of images to display"""
         if image_list and len(image_list) > 0:

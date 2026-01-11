@@ -1,6 +1,7 @@
 from Screens.ChoiceBox import ChoiceBox
 from Screens.MessageBox import MessageBox
 from Screens.VirtualKeyBoard import VirtualKeyBoard
+from Components.config import config
 import os
 import time
 import subprocess
@@ -11,9 +12,9 @@ from ..utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 class ContextMenuHandler:
-    def __init__(self, main_screen):
+    def __init__(self, main_screen, config=None):
         self.main = main_screen
-        self.config = main_screen.config
+        self.config = config or main_screen.config
         self.file_ops = main_screen.file_ops
         self.dialogs = main_screen.dialogs
         
@@ -417,7 +418,7 @@ class ContextMenuHandler:
                 # FIXED: Open settings directly without callback to prevent modal crash
                 self.main.session.open(self.main.dialogs.SetupScreen)
             elif mode == "bookmarks":
-                self.main.dialogs.show_bookmark_manager(self.main.bookmarks, self.main.config, 
+                self.main.dialogs.show_bookmark_manager(self.main.bookmarks, self.config, 
                                                        self.main.active_pane, self.main.update_ui)
             elif mode == "create":
                 self.main.dialogs.show_create_dialog(self.main.active_pane.getCurrentDirectory(), 
@@ -1620,6 +1621,109 @@ class ContextMenuHandler:
         except Exception as e:
             logger.error(f"Error showing media menu: {e}")
             self.dialogs.show_message(f"Media menu error: {e}", type="error")
+    
+    def _show_audio_menu(self, file_path, filename):
+        """Context menu for audio files - IMPROVED"""
+        try:
+            # Get directory containing the audio file
+            directory = os.path.dirname(file_path)
+            
+            # Audio file extensions
+            audio_extensions = ['.mp3', '.flac', '.wav', '.aac', '.ogg', '.m4a', '.wma', '.ac3', '.dts']
+            
+            # Get all audio files in directory
+            audio_files = []
+            try:
+                if os.path.isdir(directory):
+                    for item in sorted(os.listdir(directory)):
+                        item_path = os.path.join(directory, item)
+                        if os.path.isfile(item_path):
+                            # Check extension
+                            if any(item.lower().endswith(ext) for ext in audio_extensions):
+                                audio_files.append(item_path)
+                    
+                    logger.info(f"Found {len(audio_files)} audio files in {directory}")
+            except Exception as e:
+                logger.error(f"Error scanning directory for audio files: {e}")
+            
+            # Build menu items
+            menu_items = [
+                ("Cancel", None),
+                ("🎵 Play this audio file", "play_single"),
+            ]
+            
+            # Add "Play all" option if multiple audio files found
+            if len(audio_files) > 1:
+                menu_items.append((f"🎶 Play all {len(audio_files)} audio files in directory", "play_all"))
+            
+            # Show menu
+            self.main.session.openWithCallback(
+                lambda choice: self._handle_audio_action(choice, file_path, filename, audio_files) if choice and choice[1] else None,
+                ChoiceBox,
+                title=f"🎵 Audio: {filename}",
+                list=menu_items
+            )
+        except Exception as e:
+            logger.error(f"Error showing audio menu: {e}")
+            self.dialogs.show_message(f"Audio menu error: {e}", type="error")
+    def _handle_audio_action(self, choice, file_path, filename, audio_files):
+        """Handle audio menu action"""
+        action = choice[1]
+        
+        try:
+            if action == "play_single":
+                # Play single audio file
+                self.main.preview_media()
+            
+            elif action == "play_all":
+                # Play all audio files in directory as playlist
+                if audio_files:
+                    self._play_audio_playlist(audio_files)
+                else:
+                    self.dialogs.show_message("No audio files found in directory", type="info")
+            
+            elif action == "info":
+                self.main.show_file_info()
+            
+            elif action == "copy_other":
+                self.copy_to_other_pane(file_path)
+            
+            elif action == "move_other":
+                self.move_to_other_pane(file_path)
+                
+        except Exception as e:
+            logger.error(f"Error handling audio action: {e}")
+            self.dialogs.show_message(f"Audio action error: {e}", type="error")
+    
+    def _play_audio_playlist(self, audio_files):
+        """Play audio files as playlist"""
+        try:
+            # For now, play first file and show info about playlist
+            if audio_files:
+                self.dialogs.show_message(
+                    f"🎶 Audio Playlist\n\n"
+                    f"Files: {len(audio_files)}\n"
+                    f"Playing: {os.path.basename(audio_files[0])}\n\n"
+                    f"Note: Full playlist support coming soon!",
+                    type="info",
+                    timeout=3
+                )
+                
+                # Navigate to first file and play
+                self.main.active_pane.changeDir(os.path.dirname(audio_files[0]))
+                
+                # Find and select the first audio file
+                for i, item in enumerate(self.main.active_pane.list):
+                    if item[0][0] == audio_files[0]:
+                        self.main.active_pane.instance.moveSelectionTo(i)
+                        break
+                
+                self.main.preview_media()
+                
+        except Exception as e:
+            logger.error(f"Error playing audio playlist: {e}")
+            self.dialogs.show_message(f"Playlist error: {e}", type="error")
+
     
     def _handle_media_action(self, choice, file_path, filename):
         """Handle media menu action"""

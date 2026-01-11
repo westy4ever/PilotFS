@@ -1,6 +1,7 @@
 from Screens.ChoiceBox import ChoiceBox
 from Screens.MessageBox import MessageBox
 from Screens.VirtualKeyBoard import VirtualKeyBoard
+from Components.config import config
 import os
 import subprocess
 import threading
@@ -46,6 +47,17 @@ class Dialogs:
         except Exception as e:
             logger.error(f"Error showing confirmation: {e}")
     
+    def show_video_exit_confirmation(self, callback):
+        """Show confirmation dialog when exiting video player"""
+        try:
+            self.session.openWithCallback(
+                callback, 
+                MessageBox, 
+                "Stop playback and return to PilotFS?", 
+                MessageBox.TYPE_YESNO
+            )
+        except Exception as e:
+            logger.error(f"Error showing video exit confirmation: {e}")
     # Media exit confirmation - FIXED: removed session parameter
     def show_media_exit_confirmation(self, callback):
         """Show exit confirmation for media viewers"""
@@ -56,7 +68,23 @@ class Dialogs:
         except Exception as e:
             logger.error(f"Error showing media exit confirmation: {e}")
             # Fallback: execute callback with True (exit)
-            callback(True)        
+            callback(True)
+    
+    def show_video_exit_confirmation(self, callback):
+        """Show exit confirmation for video playback - FIXED for proper behavior"""
+        try:
+            self.session.openWithCallback(
+                callback,
+                MessageBox,
+                "Exit media player?",
+                MessageBox.TYPE_YESNO,
+                timeout=0
+            )
+        except Exception as e:
+            logger.error(f"Error showing video exit confirmation: {e}")
+            # Fallback: execute callback with True (exit)
+            callback(True)
+        
     
     def show_input(self, title, text="", callback=None):
         """Show input dialog"""
@@ -739,7 +767,7 @@ class Dialogs:
             self.show_choice(
                 "Manage Bookmarks",
                 bookmark_list,
-                lambda choice: self._handle_bookmark_action(choice, bookmarks, config, filelist, update_callback) if choice else None
+                lambda choice, cfg=config: self._handle_bookmark_action(choice, bookmarks, cfg, filelist, update_callback) if choice else None
             )
         except Exception as e:
             logger.error(f"Error showing bookmark manager: {e}")

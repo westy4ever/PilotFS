@@ -1,6 +1,7 @@
 from Screens.Screen import Screen
 from Screens.MessageBox import MessageBox
 from Screens.VirtualKeyBoard import VirtualKeyBoard
+from Screens.InfoBar import MoviePlayer
 from Components.ActionMap import ActionMap
 from Components.FileList import FileList
 from Components.Label import Label
@@ -24,16 +25,57 @@ from .dialogs import Dialogs
 
 logger = get_logger(__name__)
 
+
+
+class MoviePlayerWithDirectExit(MoviePlayer):
+    """Custom MoviePlayer that handles EXIT key directly without STOP."""
+    
+    def __init__(self, session, service, main_screen_ref):
+        MoviePlayer.__init__(self, session, service)
+        self.main_screen_ref = main_screen_ref
+        
+        # Override actions to intercept EXIT/CANCEL
+        self["actions"] = ActionMap(["MoviePlayerActions", "OkCancelActions"],
+        {
+            "cancel": self.askLeavePlayer,  # EXIT key
+            "exit": self.askLeavePlayer,     # Alternative EXIT
+            "leavePlayer": self.askLeavePlayer,
+        }, -2)
+    
+    def askLeavePlayer(self):
+        """Ask for exit confirmation when EXIT is pressed."""
+        # Stop playback first
+        self.session.nav.stopService()
+        
+        # Show exit confirmation via main screen
+        if hasattr(self, 'main_screen_ref') and self.main_screen_ref:
+            self.main_screen_ref.dialogs.show_video_exit_confirmation(
+                lambda confirmed: self.exitConfirmed(confirmed)
+            )
+        else:
+            # Fallback: just close
+            self.close()
+    
+    def exitConfirmed(self, confirmed):
+        """Handle exit confirmation result."""
+        if confirmed:
+            # User confirmed exit
+            self.close()
+        else:
+            # User cancelled - resume playback
+            self.session.nav.playService(self.service)
+
+
 class PilotFSMain(Screen):
     def __init__(self, session):
         Screen.__init__(self, session)
         
-        # Get screen dimensions
+        # 1. Get screen dimensions
         w, h = getDesktop(0).size().width(), getDesktop(0).size().height()
         pane_width = (w - 60) // 2
-        pane_height = h - 250  # Adjusted for cleaner layout
+        pane_height = h - 320 
         
-        # Initialize core components
+        # 2. Initialize backend core components
         self.config = PilotFSConfig()
         self.file_ops = FileOperations(self.config)
         self.archive_mgr = ArchiveManager(self.file_ops)
@@ -41,17 +83,19 @@ class PilotFSMain(Screen):
         self.remote_mgr = RemoteConnectionManager(self.config)
         self.mount_mgr = MountManager(self.config)
         
-        # Initialize UI components
-        self.dialogs = Dialogs(self.session)
-        self.context_menu = ContextMenuHandler(self)
+        # 3. Initialize state (MOVE THIS HERE)
+        self.marked_files = set()
+        self.active_pane = None # Good practice to define this early
         
-        # Setup UI
+        # 4. Initialize UI components
+        self.dialogs = Dialogs(self.session)
+        self.context_menu = ContextMenuHandler(self, self.config)
+        
+        # 5. Setup UI (Now it's safe to call because marked_files exists)
         self.setup_ui(w, h, pane_width, pane_height)
         
-        # Initialize state
+        # 6. Finalize state and actions
         self.init_state()
-        
-        # Setup actions
         self.setup_actions()
         
         # Start
@@ -62,69 +106,41 @@ class PilotFSMain(Screen):
         button_y = h - 60
         label_y = h - 45
         
-        # CHANGED: Selection color from #FF0000 (red) to #FF5555 (softer red) for better visibility
+        # 1. THE SKIN (Note: Added font and itemHeight attributes inside the widget tags)
         self.skin = f"""
         <screen name="PilotFSMain" position="0,0" size="{w},{h}" backgroundColor="#1a1a1a" flags="wfNoBorder">
             <eLabel position="0,0" size="{w},60" backgroundColor="#0055aa" />
             <eLabel text="PilotFS PLATINUM" position="20,8" size="600,44" font="Regular;30" halign="left" valign="center" transparent="1" foregroundColor="#ffffff" />
             <eLabel text="v6.1 Professional" position="{w-250},12" size="230,36" font="Regular;22" halign="right" valign="center" transparent="1" foregroundColor="#00ffff" />
             
-            <!-- Left Pane Banner -->
-            <widget name="left_banner" position="25,70" size="{pane_width},28" 
-                    font="Regular;20" halign="left" valign="center" 
-                    backgroundColor="#333333" foregroundColor="#ffff00" 
-                    borderWidth="0" borderColor="#ffff00" />
+            <widget name="left_banner" position="25,70" size="{pane_width},28" font="Regular;20" halign="left" valign="center" backgroundColor="#333333" foregroundColor="#ffff00" />
+            <eLabel position="{pane_width + 30},70" size="10,28" backgroundColor="#555555" />
+            <widget name="right_banner" position="{pane_width + 45},70" size="{pane_width},28" font="Regular;20" halign="left" valign="center" backgroundColor="#333333" foregroundColor="#aaaaaa" />
             
-            <!-- Vertical Separator -->
-            <eLabel position="{pane_width + 30},70" size="10,28" 
-                    backgroundColor="#555555" />
+            <widget name="left_pane" position="25,110" size="{pane_width},{pane_height}" font="Regular;18" itemHeight="38" selectionColor="#FF5555" scrollbarMode="showOnDemand" />
+            <widget name="right_pane" position="{pane_width + 45},110" size="{pane_width},{pane_height}" font="Regular;18" itemHeight="38" selectionColor="#FF5555" scrollbarMode="showOnDemand" />
             
-            <!-- Right Pane Banner -->
-            <widget name="right_banner" position="{pane_width + 45},70" 
-                    size="{pane_width},28" font="Regular;20" halign="left" 
-                    valign="center" backgroundColor="#333333" 
-                    foregroundColor="#aaaaaa" borderWidth="0" borderColor="#ffff00" />
+            <widget name="progress_bar" position="20,{h-150}" size="{w-40},8" backgroundColor="#333333" foregroundColor="#00aaff" borderWidth="2" borderColor="#aaaaaa" />
+            <widget name="info_panel" position="20,{h-135}" size="{w-40},30" font="Regular;20" foregroundColor="#ff8800" transparent="1" />
+            <widget name="status_bar" position="20,{h-100}" size="{w-40},35" font="Regular;22" foregroundColor="#ffffff" transparent="1" />
             
-            <!-- File Lists with CHANGED selection color -->
-            <widget name="left_pane" position="25,110" size="{pane_width},{pane_height}" 
-                    itemHeight="40" selectionColor="#FF5555" scrollbarMode="showOnDemand" />
-            <widget name="right_pane" position="{pane_width + 45},110" size="{pane_width},{pane_height}" 
-                    itemHeight="40" selectionColor="#FF5555" scrollbarMode="showOnDemand" />
-            
-            <!-- Info Panels -->
-            <widget name="progress_bar" position="20,{h-150}" size="{w-40},8" 
-                    backgroundColor="#333333" foregroundColor="#00aaff" 
-                    borderWidth="2" borderColor="#aaaaaa" />
-            <widget name="info_panel" position="20,{h-135}" size="{w-40},30" 
-                    font="Regular;20" foregroundColor="#ff8800" transparent="1" />
-            <widget name="status_bar" position="20,{h-100}" size="{w-40},35" 
-                    font="Regular;22" foregroundColor="#ffffff" transparent="1" />
-            
-            <!-- Footer -->
             <eLabel position="0,{h-60}" size="{w},60" backgroundColor="#000000" />
-            
-            <!-- Button Icons -->
             <ePixmap pixmap="buttons/red.png" position="20,{button_y}" size="30,30" alphatest="on" />
             <ePixmap pixmap="buttons/green.png" position="180,{button_y}" size="30,30" alphatest="on" />
             <ePixmap pixmap="buttons/yellow.png" position="340,{button_y}" size="30,30" alphatest="on" />
             <ePixmap pixmap="buttons/blue.png" position="500,{button_y}" size="30,30" alphatest="on" />
             
-            <!-- Button Labels -->
             <eLabel text="Delete" position="60,{label_y}" size="100,30" font="Regular;20" transparent="1" foregroundColor="#ffffff" />
             <eLabel text="Rename" position="220,{label_y}" size="100,30" font="Regular;20" transparent="1" foregroundColor="#ffffff" />
             <eLabel text="Select" position="380,{label_y}" size="100,30" font="Regular;20" transparent="1" foregroundColor="#ffffff" />
             <eLabel text="Copy/Move" position="540,{label_y}" size="150,30" font="Regular;20" transparent="1" foregroundColor="#ffffff" />
-            
-            <!-- Help Text -->
-            <widget name="help_text" position="50,{h-80}" size="{w-100},30" 
-                    font="Regular;18" halign="right" transparent="1" foregroundColor="#aaaaaa" />
+            <widget name="help_text" position="50,{h-80}" size="{w-100},30" font="Regular;18" halign="right" transparent="1" foregroundColor="#aaaaaa" />
         </screen>"""
         
-        # Create widgets
+        # 2. CREATE WIDGETS
         left_path = self.config.plugins.pilotfs.left_path.value
         right_path = self.config.plugins.pilotfs.right_path.value
         
-        # Create FileLists with proper color handling
         self["left_pane"] = FileList(left_path, showDirectories=True, showFiles=True)
         self["right_pane"] = FileList(right_path, showDirectories=True, showFiles=True)
         self["left_pane"].useSelection = True
@@ -136,6 +152,18 @@ class PilotFSMain(Screen):
         self["left_banner"] = Label("◀ LEFT PANE")
         self["right_banner"] = Label("RIGHT PANE ▶")
         self["help_text"] = Label("OK:Navigate(hold:Menu) 0:Menu YEL:Select MENU:Tools")
+
+        # 3. APPLY FORCE (Must be at the very bottom of setup_ui)
+        from enigma import gFont
+        for pane in [self["left_pane"], self["right_pane"]]:
+            try:
+                # Force the row height to stop overlapping
+                pane.itemHeight = 38
+                if hasattr(pane, "l"):
+                    pane.l.setItemHeight(38)
+                    pane.l.setFont(gFont("Regular", 18))
+            except:
+                pass
 
     def init_state(self):
         """Initialize application state"""
@@ -182,6 +210,7 @@ class PilotFSMain(Screen):
     def setup_actions(self):
         """Setup key mappings"""
         self["actions"] = ActionMap([
+            "PilotFSActions",
             "OkCancelActions", "ColorActions", "DirectionActions", 
             "MenuActions", "NumberActions", "ChannelSelectBaseActions"
         ], {
@@ -194,6 +223,7 @@ class PilotFSMain(Screen):
             "red": self.delete_request,
             "green": self.rename_request,
             "yellow": self.toggle_selection,
+            "yellow_long": self.unmark_all,
             "blue": self.quick_copy,
             "menu": self.open_tools,
             "0": self.zero_pressed,
@@ -334,25 +364,29 @@ class PilotFSMain(Screen):
                 logger.error(f"Fallback banner styling also failed: {e2}")
 
     def update_status_bar(self):
-        """Update status bar text - PATH COMPLETELY REMOVED"""
+        """Update the bottom status bar with selection info"""
         try:
-            marked = [x for x in self.active_pane.list if x[0][3]]
-        except Exception:
-            marked = []
-        
-        if self.operation_in_progress:
-            text = f"⚙ OPERATION: {self.operation_current}/{self.operation_total} items..."
-        elif self.clipboard:
-            mode = "COPY" if self.clipboard_mode == "copy" else "CUT"
-            text = f"📋 CLIPBOARD: {len(self.clipboard)} items ({mode}) - Press BLUE to paste"
-        elif marked:
-            total_size = sum(self.file_ops.get_file_size(x[0][0]) for x in marked)
-            text = f"✓ SELECTED: {len(marked)} items ({format_size(total_size)}) - Press 0 for menu"
-        else:
-            # PATH COMPLETELY REMOVED - Shows only navigation help
-            text = "Arrows Navigate | RED:delete  GREEN:rename  YELLOW:select  BLUE:copy/move"
-        
-        self["status_bar"].setText(text)
+            # 1. Get the number of marked items from our set
+            count = len(self.marked_files)
+            
+            # 2. Get current path info for the active pane
+            sel = self.active_pane.getSelection()
+            current_name = ""
+            if sel and sel[0]:
+                current_name = os.path.basename(sel[0])
+
+            # 3. Create the status text
+            if count > 0:
+                # Show marked count in GREEN/BOLD style if supported by skin
+                status_text = "✓ SELECTED: %d items | Current: %s" % (count, current_name)
+            else:
+                status_text = "Path: %s" % self.active_pane.getCurrentDirectory()
+
+            # 4. Update the Label widget in the skin
+            self["status_bar"].setText(status_text)
+            
+        except Exception as e:
+            logger.error(f"Error updating status bar: {e}")
 
     def update_info_panel(self):
         """Update info panel with current file details"""
@@ -441,10 +475,10 @@ class PilotFSMain(Screen):
                 # Video files: PLAY
                 if ext in ['.mp4', '.mkv', '.avi', '.ts', '.m2ts', '.mov', '.m4v', '.mpg', '.mpeg', '.wmv', '.flv']:
                     self.preview_media()
-                
-                # Audio files: PLAY
+                # Audio files: SHOW MENU (Play single/Play all)
                 elif ext in ['.mp3', '.flac', '.wav', '.aac', '.ogg', '.m4a', '.wma', '.ac3', '.dts']:
-                    self.preview_media()
+                    self.context_menu.show_smart_context_menu(path)
+
                 
                 # === SHOW SMART CONTEXT MENU ===
                 # Script files: Show menu (Run/View/Edit)
@@ -476,6 +510,44 @@ class PilotFSMain(Screen):
             logger.error(f"Error in OK navigation: {e}")
             self.show_error("Navigation", e)
 
+    def toggle_selection(self):
+        """Toggle mark/unmark for current item - YELLOW button"""
+        try:
+            # 1. Get the current active pane and what is highlighted
+            pane = self.active_pane
+            sel = pane.getSelection()
+            
+            if sel and sel[0]:
+                # 2. Toggle the visual mark in the Enigma2 FileList component
+                pane.markSelected()
+                
+                # 3. Update our internal tracker for the UI red circle indicator
+                path = sel[0]
+                if path in self.marked_files:
+                    self.marked_files.remove(path)
+                else:
+                    self.marked_files.add(path)
+                
+                # 4. Refresh the bottom status bar and file info panel
+                self.update_info_panel()
+                self.update_status_bar()
+                
+                logger.debug(f"Toggled selection for: {path}")
+        except Exception as e:
+            logger.error(f"Error toggling selection: {e}")
+
+    def unmark_all(self):
+        """Clears all marked files from memory and refreshes the UI"""
+        if self.marked_files:
+            self.marked_files.clear()
+            # Refresh both panes so the visual markers (like 'X') disappear
+            self["left_pane"].refresh()
+            self["right_pane"].refresh()
+            self["status_bar"].setText("All selections cleared.")
+            print("[PilotFS] Marked files cleared by user")
+        else:
+            self["status_bar"].setText("Nothing was selected.")        
+            
     def up(self):
         """Move up in file list"""
         try:
@@ -1258,11 +1330,27 @@ class PilotFSMain(Screen):
             logger.warning(f"Missing tools: {', '.join(missing)}")
 
     def movie_player_callback(self, *args):
-        """Callback when movie player closes - return to plugin"""
-        logger.info("Movie player closed, returning to plugin")
-        self.preview_in_progress = False
-        # Refresh the current view
-        self.update_ui()
+        """Callback when movie player closes - ask for exit confirmation"""
+        logger.info("Movie player closed, showing exit confirmation")
+        
+        # Show exit confirmation dialog
+        self.dialogs.show_video_exit_confirmation(self.movie_player_exit_confirmed)
+    
+    def movie_player_exit_confirmed(self, confirmed):
+        """Handle video exit confirmation result"""
+        if confirmed:
+            logger.info("User confirmed exit from video player")
+            self.preview_in_progress = False
+            self.update_ui()
+        else:
+            logger.info("User cancelled exit, returning to video")
+            # User chose not to exit - reopen the video
+            sel = self.active_pane.getSelection()
+            if sel and sel[0]:
+                file_path = sel[0]
+                if self.can_play_file(file_path):
+                    # Replay the video
+                    self.preview_media()
 
     def play_media_file(self, path):
         """Play media file using Enigma2 service player"""
@@ -1277,10 +1365,12 @@ class PilotFSMain(Screen):
             ref.setName(os.path.basename(path))
             
             # Open MoviePlayer with callback
+            # Use custom player that handles EXIT key properly
             self.session.openWithCallback(
                 self.movie_player_callback,
-                MoviePlayer,
-                ref
+                MoviePlayerWithDirectExit,
+                ref,
+                self  # Pass main_screen reference for exit confirmation
             )
             
         except ImportError:

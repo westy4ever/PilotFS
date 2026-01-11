@@ -1,0 +1,12 @@
+<keymap>
+    <context name="PilotFSActions">
+        <key id="KEY_YELLOW" mapto="yellow" flags="m" />
+        <key id="KEY_YELLOW" mapto="yellow_long" flags="l" />
+        <key id="KEY_RED" mapto="red" flags="m" />
+        <key id="KEY_GREEN" mapto="green" flags="m" />
+        <key id="KEY_BLUE" mapto="blue" flags="m" />
+        <key id="KEY_MENU" mapto="menu" flags="m" />
+        <key id="KEY_OK" mapto="ok" flags="m" />
+        <key id="KEY_EXIT" mapto="cancel" flags="m" />
+    </context>
+</keymap>
