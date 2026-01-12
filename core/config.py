@@ -7,10 +7,15 @@ from ..utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 class PilotFSConfig:
+    # Change the class to a standard function
     def __init__(self):
+        # FIX: Ensure global plugins exist before assignment
+        from Components.config import config as en_config, ConfigSubsection
+        if not hasattr(en_config, 'plugins'):
+            en_config.plugins = ConfigSubsection()
+            
+        self.plugins = en_config.plugins 
         self.setup_config()
-        # Provide access to the global config
-        self.plugins = config.plugins
     
     def setup_config(self):
         """Initialize configuration sections"""

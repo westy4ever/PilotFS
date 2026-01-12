@@ -2,6 +2,7 @@
 Network Browser - Enables browsing remote filesystems in dual-pane view
 """
 import os
+from Components.config import config 
 from ..exceptions import RemoteConnectionError
 
 class NetworkBrowser:
@@ -73,7 +74,7 @@ class NetworkBrowser:
         
         # Get password from config if available
         if protocol == 'ftp':
-            password = self.config.plugins.pilotfs.ftp_pass.value
+            password = config.plugins.pilotfs.ftp_pass.value
             client = ftp_client
             
             # Connect if not connected
@@ -96,7 +97,7 @@ class NetworkBrowser:
             return result
             
         elif protocol == 'sftp':
-            password = self.config.plugins.pilotfs.sftp_pass.value
+            password = config.plugins.pilotfs.sftp_pass.value
             success, entries = sftp_client.list_directory(host, port, username, password, path)
             
             if not success:
@@ -113,9 +114,9 @@ class NetworkBrowser:
             return result
             
         elif protocol == 'webdav':
-            password = self.config.plugins.pilotfs.webdav_pass.value
-            username = self.config.plugins.pilotfs.webdav_user.value
-            url = self.config.plugins.pilotfs.webdav_url.value + path
+            password = config.plugins.pilotfs.webdav_pass.value
+            username = config.plugins.pilotfs.webdav_user.value
+            url = config.plugins.pilotfs.webdav_url.value + path
             
             success, entries = webdav_client.list_directory(url, username, password)
             
@@ -148,7 +149,7 @@ class NetworkBrowser:
         username = parsed.get('username', 'anonymous')
         
         if protocol == 'ftp':
-            password = self.config.plugins.pilotfs.ftp_pass.value
+            password = config.plugins.pilotfs.ftp_pass.value
             if not ftp_client.is_connected():
                 ftp_client.connect(host, port, username, password)
             success, msg = ftp_client.download_file(path, local_path)

@@ -33,7 +33,11 @@ class ContextMenuHandler:
     
     def __init__(self, main_screen, config=None):
         self.main = main_screen
-        self.config = config or main_screen.config
+        # FIX: Ensure config is always available even if main_screen.config is None
+        self.config = config or getattr(main_screen, 'config', None)
+        if self.config is None:
+            from Components.config import config as en_config
+            self.config = en_config
         self.file_ops = main_screen.file_ops
         self.dialogs = main_screen.dialogs
         

@@ -3,6 +3,7 @@ from Screens.MessageBox import MessageBox
 from Screens.VirtualKeyBoard import VirtualKeyBoard
 from Screens.InfoBar import MoviePlayer
 from Components.ActionMap import ActionMap
+from Components.config import config, configfile
 from Components.FileList import FileList
 from Components.Label import Label
 from Components.ProgressBar import ProgressBar
@@ -75,13 +76,25 @@ class PilotFSMain(Screen):
     def __init__(self, session):
         Screen.__init__(self, session)
         
+        # FIX: Initialize config FIRST and ensure it is fully ready
+        self.config = PilotFSConfig()
+        
         # 1. Get screen dimensions
         w, h = getDesktop(0).size().width(), getDesktop(0).size().height()
         pane_width = (w - 60) // 2
         pane_height = h - 320 
         
         # 2. Initialize backend core components
-        self.config = PilotFSConfig()
+        try:
+            self.config = PilotFSConfig()
+            # Ensure the internal plugins subsection is forced into the object
+            if not hasattr(self.config, 'plugins'):
+                from Components.config import config as en_config
+                self.config.plugins = en_config.plugins
+        except Exception as e:
+            print(f"[PilotFS] Config Init Error: {e}")
+            from Components.config import config as en_config
+            self.config = en_config # Fallback to global config
         self.file_ops = FileOperations(self.config)
         self.archive_mgr = ArchiveManager(self.file_ops)
         self.search_engine = SearchEngine()
@@ -94,6 +107,7 @@ class PilotFSMain(Screen):
         
         # 4. Initialize UI components
         self.dialogs = Dialogs(self.session)
+        # Pass the fully ready config object
         self.context_menu = ContextMenuHandler(self, self.config)
         
         # 5. Setup UI (Now it's safe to call because marked_files exists)
@@ -1539,8 +1553,8 @@ class PilotFSMain(Screen):
                         p.right_path.save()
             
             # 3. Commit to /etc/enigma2/settings
-            from Components.config import config
-            config.save()
+            from Components.config import configfile
+            configfile.save()
             
             logger.info("PilotFS: Paths saved on exit.")
             self.close() # Now close the screen

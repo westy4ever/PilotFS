@@ -1,12 +1,14 @@
+import os
 from Screens.Screen import Screen
 from Screens.MessageBox import MessageBox
 from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.ConfigList import ConfigListScreen
-from Components.config import config, getConfigListEntry, ConfigNothing
+from Components.config import config, getConfigListEntry, ConfigNothing, configfile
 from enigma import getDesktop
 
-from ..core.config import PilotFSConfig
+# Corrected: We only need the logger here now 
+# because we use the global 'config' object directly in __init__
 from ..utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -16,9 +18,9 @@ class PilotFSSetup(ConfigListScreen, Screen):
         Screen.__init__(self, session)
         self.session = session
 
-        from ..core.config import PilotFSConfig                 
-        self.config_manager = PilotFSConfig()                   
-        self.config_manager.setup_config()
+        # Use a distinct name for the settings object
+        from Components.config import config as en_config
+        self.p_config = en_config.plugins.pilotfs
         
         # UI Layout Calculations
         desktop_w, desktop_h = getDesktop(0).size().width(), getDesktop(0).size().height()
@@ -156,22 +158,15 @@ class PilotFSSetup(ConfigListScreen, Screen):
     def key_save(self):
         """Save configuration changes and close screen"""
         try:
-            # 1. Save each individual setting in the config list
-            for item in self.list:
-                # item[1] is the config element (e.g., ConfigText, ConfigSelection)
+            for item in self["config"].list:
                 if len(item) > 1 and hasattr(item[1], 'save'):
                     item[1].save()
             
-            # 2. Access the global Enigma2 config
-            from Components.config import config
-            
-            # 3. Commit all changes to /etc/enigma2/settings
-            # We do NOT call config.plugins.pilotfs.save() as it causes a crash
-            config.save() 
-            
-            logger.info("PilotFS settings saved successfully")
-            
-            # 4. Close the setup screen
+            from Components.config import configfile
+            configfile.save()
+            self.close()
+        except Exception as e:
+            print("[PilotFS] Save Error:", e)
             self.close()
             
         except Exception as e:

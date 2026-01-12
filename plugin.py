@@ -1,3 +1,11 @@
+from Components.config import config, ConfigSubsection, ConfigSelection, ConfigText, ConfigYesNo
+try:
+    if not hasattr(config.plugins, 'pilotfs'):
+        config.plugins.pilotfs = ConfigSubsection()
+        config.plugins.pilotfs.enabled = ConfigYesNo(default=True)
+        config.plugins.pilotfs.log_path = ConfigText(default='/tmp/pilotfs.log')
+except Exception as e:
+    print('[PilotFS Patch] Config init failed: %s' % str(e))
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
@@ -75,6 +83,7 @@ except ImportError:
         logger = logging.getLogger(__name__)
         logger.error("Failed to setup proper logging: %s" % str(e))
 
+from Components.config import config
 def main(session, **kwargs):
     """Main entry point for the plugin"""
     logger.info("=" * 50)
@@ -141,6 +150,7 @@ def menu(menuid, **kwargs):
         return [(_("PilotFS Platinum"), main, "pilotfs", 46)]
     return []
 
+from Components.config import config
 def Plugins(**kwargs):
     """Plugin descriptor"""
     description = _("Professional File Manager with Smart Context Menus")
