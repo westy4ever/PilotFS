@@ -12,6 +12,25 @@ from ..utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 class ContextMenuHandler:
+    def smart_callback(self, choice, original_handler, *args):
+        """Traffic controller for all menus: Handles EXIT/BACK automatically"""
+        # If user pressed EXIT (choice is None)
+        if choice is None:
+            # If we were in a submenu, go back to tools. If already in tools, just close.
+            if getattr(self, 'current_menu_level', 0) > 0:
+                self.current_menu_level = 0
+                self.show_tools_menu()
+            return
+        
+        # If user selected a 'back' button in the list
+        if isinstance(choice, (list, tuple)) and len(choice) > 1 and choice[1] == "back":
+            self.current_menu_level = 0
+            self.show_tools_menu()
+            return
+
+        # Otherwise, run the actual tool (copy, delete, etc.)
+        original_handler(choice, *args)
+    
     def __init__(self, main_screen, config=None):
         self.main = main_screen
         self.config = config or main_screen.config
@@ -89,6 +108,7 @@ class ContextMenuHandler:
         try:
             current_dir = self.main.active_pane.getCurrentDirectory()
             menu_items = [
+                (" <-- Back", "back"),
                 ("📂 Open Current Folder", "open"),
                 ("📝 Rename Current Folder", "rename_folder"),
                 ("📊 Disk Usage Here", "disk_usage"),
@@ -103,22 +123,18 @@ class ContextMenuHandler:
             ]
             
             self.main.session.openWithCallback(
-                lambda choice: self.handle_general_context_menu(choice, current_dir) if choice else None,
+                lambda choice: self.smart_callback(choice, self.handle_general_context_menu, current_dir),
                 ChoiceBox,
                 title=f"📂 Context: {os.path.basename(current_dir) or 'Root'}",
                 list=menu_items
             )
         except Exception as e:
-            logger.error(f"Error showing general context menu: {e}")
-            self.dialogs.show_message(f"Menu error: {e}", type="error")
-    
+            logger.error(f"Error: {e}")
+            self.main.session.open(MessageBox, f"Error: {e}", MessageBox.TYPE_ERROR)
+
     def handle_general_context_menu(self, choice, current_dir):
-        """Handle general context menu selection"""
-        if not choice:
-            return
-        
         action = choice[1]
-        
+
         try:
             if action == "open":
                 self.main.active_pane.refresh()
@@ -141,7 +157,8 @@ class ContextMenuHandler:
             elif action == "bookmark":
                 self.main.dialogs.show_bookmark_dialog(current_dir, self.main.bookmarks, self.main.config)
             elif action == "folder_settings":
-                self.show_folder_settings(current_dir)
+                # Use existing file info method instead of non-existent show_folder_settings
+                self.main.show_file_info()
         except Exception as e:
             logger.error(f"Error handling general context menu: {e}")
             self.dialogs.show_message(f"Action error: {e}", type="error")
@@ -157,41 +174,41 @@ class ContextMenuHandler:
             is_dir = os.path.isdir(item_path)
             item_name = os.path.basename(item_path)
             
-            menu_items = []
+            menu_items = [
+                (" <-- Back", "back"),
+                (" <-- Back", "back"),
+                ("📂 Open/Explore", "open"),
+                ("✏️ Rename", "rename"),
+                ("🗑️ Delete", "delete"),
+                ("📋 Copy", "copy"),
+                ("✂️ Cut", "cut"),
+                ("📄 Info", "info"),
+            ]
             
-            # Common actions
+            # Add directory-specific actions
             if is_dir:
-                menu_items.append(("📂 Open Folder", "open"))
-                menu_items.append(("📁 Explore Contents", "explore"))
+                menu_items.append(("📦 Compress", "compress"))
             else:
-                menu_items.append(("📄 Open File", "open"))
-            
-            menu_items.append(("📝 Rename", "rename"))
-            menu_items.append(("🗑️ Delete", "delete"))
-            menu_items.append(("📋 Copy", "copy"))
-            menu_items.append(("✂️ Cut", "cut"))
-            menu_items.append(("📊 Info", "info"))
-            
-            # File-specific actions
-            if not is_dir:
+                # File-specific actions based on extension
                 ext = os.path.splitext(item_path)[1].lower()
                 if ext in ['.mp4', '.mkv', '.avi', '.ts', '.mp3', '.flac']:
-                    menu_items.append(("🎬 Play Media", "play"))
+                    menu_items.append(("🎵 Play", "play"))
                 if ext in ['.txt', '.log', '.conf', '.py', '.sh', '.xml', '.json']:
-                    menu_items.append(("📝 Edit Text", "edit"))
+                    menu_items.append(("📝 Edit", "edit"))
                 if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp']:
-                    menu_items.append(("🖼️ View Image", "view"))
+                    menu_items.append(("🖼️ View", "view"))
                 if ext in ['.zip', '.tar', '.tar.gz', '.tgz', '.rar']:
-                    menu_items.append(("📦 Extract Archive", "extract"))
+                    menu_items.append(("📂 Extract", "extract"))
             
-            # Additional actions
-            menu_items.append(("📁 Copy to Other Pane", "copy_other"))
-            menu_items.append(("✂️ Move to Other Pane", "move_other"))
-            menu_items.append(("🔒 Set Permissions", "chmod"))
+            # Additional actions for files
             if not is_dir:
-                menu_items.append(("🔐 Calculate Checksum", "checksum"))
-            
-            menu_items.append(("📄 Create Shortcut", "shortcut"))
+                menu_items.extend([
+                    ("📄 Copy to Other Pane", "copy_other"),
+                    ("📄 Move to Other Pane", "move_other"),
+                    ("🔒 Permissions", "chmod"),
+                    ("🔐 Checksum", "checksum"),
+                    ("🔗 Create Shortcut", "shortcut"),
+                ])
             
             # Compress if multiple items selected
             marked = [x for x in self.main.active_pane.list if x[0][3]]
@@ -199,20 +216,17 @@ class ContextMenuHandler:
                 menu_items.append(("📦 Compress Selected", "compress"))
             
             self.main.session.openWithCallback(
-                lambda choice: self.handle_item_context_menu(choice, item_path, is_dir, item_name) if choice else None,
+                lambda choice: self.smart_callback(choice, self.handle_item_context_menu, item_path, is_dir, item_name),
                 ChoiceBox,
                 title=f"📋 {item_name}",
                 list=menu_items
             )
         except Exception as e:
             logger.error(f"Error showing item context menu: {e}")
-            self.dialogs.show_message(f"Menu error: {e}", type="error")
+            self.main.session.open(MessageBox, f"Error: {e}", MessageBox.TYPE_ERROR)
     
     def handle_item_context_menu(self, choice, item_path, is_dir, item_name):
         """Handle item context menu selection"""
-        if not choice:
-            return
-        
         action = choice[1]
         
         try:
@@ -263,6 +277,8 @@ class ContextMenuHandler:
         """Show context menu for multiple selected items"""
         try:
             menu_items = [
+                (" <-- Back", "back"),
+                (" <-- Back", "back"),
                 ("📦 Compress Selected Items", "compress_multi"),
                 ("📋 Copy Selected Items", "copy_multi"),
                 ("✂️ Cut Selected Items", "cut_multi"),
@@ -274,20 +290,17 @@ class ContextMenuHandler:
             ]
             
             self.main.session.openWithCallback(
-                lambda choice: self.handle_multi_selection_menu(choice, marked_items) if choice else None,
+                lambda choice: self.smart_callback(choice, self.handle_multi_selection_menu, marked_items),
                 ChoiceBox,
                 title=f"📋 {len(marked_items)} Selected Items",
                 list=menu_items
             )
         except Exception as e:
             logger.error(f"Error showing multi-selection context menu: {e}")
-            self.dialogs.show_message(f"Menu error: {e}", type="error")
+            self.main.session.open(MessageBox, f"Error: {e}", MessageBox.TYPE_ERROR)
     
     def handle_multi_selection_menu(self, choice, marked_items):
         """Handle multi-selection menu action"""
-        if not choice:
-            return
-        
         action = choice[1]
         file_paths = [item[0][0] for item in marked_items]
         
@@ -407,16 +420,39 @@ class ContextMenuHandler:
             self.dialogs.show_message(f"Tools menu error: {e}", type="error")
     
     def tools_callback(self, answer):
-        """Handle tools menu selection - FIXED: Updated to use correct parameters"""
-        if not answer or answer[1] is None:
+        if not answer:
             return
-        
+        # If user pressed EXIT (answer is None) or selected a 'back' option
+        if answer[1] is None:
+            # Check if we are in a submenu
+            if self.current_menu_level > 0:
+                self.current_menu_level = 0 # Reset level
+                self.show_tools_menu()      # Open the main menu again
+            return
+
         mode = answer[1]
         
+        # If the user specifically chose a "Back" button in your list
+        if mode == "back":
+            self.show_tools_menu()
+            return
+        
         try:
+            # FIXED: Use self.config instead of importing config directly
             if mode == "cfg":
-                # FIXED: Open settings directly without callback to prevent modal crash
-                self.main.session.open(self.main.dialogs.SetupScreen)
+                # FIXED: Direct import to avoid circular dependency
+                try:
+                    # Try relative import first
+                    from ..ui.setup_screen import PilotFSSetup
+                    self.main.session.open(PilotFSSetup, self.config)
+                except ImportError:
+                    # Fallback to absolute import
+                    try:
+                        from Plugins.Extensions.PilotFS.ui.setup_screen import PilotFSSetup
+                        self.main.session.open(PilotFSSetup, self.config)
+                    except Exception as e:
+                        logger.error(f"Cannot import settings screen: {e}")
+                        self.dialogs.show_message("Settings screen unavailable", type="error")
             elif mode == "bookmarks":
                 self.main.dialogs.show_bookmark_manager(self.main.bookmarks, self.config, 
                                                        self.main.active_pane, self.main.update_ui)
@@ -568,7 +604,6 @@ class ContextMenuHandler:
     def handle_cloud_menu(self, choice):
         """Handle cloud sync menu with proper back navigation"""
         if not choice:
-            # User pressed EXIT - return to main tools menu
             self.show_tools_menu()
             return
         
@@ -623,7 +658,6 @@ class ContextMenuHandler:
                         "Install rclone now?",
                         lambda res: self._install_rclone(res, show_menu_after) if res else None
                     )
-                    
             except Exception as e:
                 logger.error(f"Error checking rclone: {e}")
                 self.dialogs.show_message(f"Error checking rclone: {str(e)}", type="error")
@@ -715,7 +749,6 @@ class ContextMenuHandler:
     def handle_repair_menu(self, choice):
         """Handle repair menu with proper back navigation"""
         if not choice:
-            # User pressed EXIT - return to main tools menu
             self.show_tools_menu()
             return
         
@@ -807,7 +840,7 @@ class ContextMenuHandler:
                 
                 for category, packages in installed_deps.items():
                     if packages:
-                        message += f"\n📁 {category.replace('_', ' ')}:\n"
+                        message += f"📁 {category.replace('_', ' ')}:\n"
                         for pkg in packages[:5]:  # Show first 5
                             message += f"  • {pkg}\n"
                         if len(packages) > 5:
@@ -1259,25 +1292,6 @@ class ContextMenuHandler:
             logger.error(f"Error creating shortcut: {e}")
             self.dialogs.show_message(f"Shortcut error: {e}", type="error")
     
-    def show_folder_settings(self, folder_path):
-        """Folder-specific settings"""
-        try:
-            info = self.file_ops.get_file_info(folder_path)
-            if info:
-                msg = f"📁 Folder Settings\n\n"
-                msg += f"Path: {info['path']}\n"
-                msg += f"Permissions: {info['permissions']}\n"
-                msg += f"Owner: {info['owner']}\n"
-                msg += f"Group: {info['group']}\n"
-                msg += f"Modified: {info['modified']}\n"
-                if 'item_count' in info:
-                    msg += f"Items: {info['item_count']}\n"
-                
-                self.main.dialogs.show_message(msg, type="info")
-        except Exception as e:
-            logger.error(f"Error showing folder settings: {e}")
-            self.main.dialogs.show_message(f"Cannot read folder info:\n{e}", type="error")
-    
     def show_smart_context_menu(self, file_path):
         """Show smart context menu based on file type"""
         try:
@@ -1313,6 +1327,8 @@ class ContextMenuHandler:
         """Context menu for shell scripts"""
         try:
             menu_items = [
+                (" <-- Back", "back"),
+                (" <-- Back", "back"),
                 ("Cancel", None),
                 ("View or edit this shell script", "view"),
                 ("Run script", "run"),
@@ -1334,6 +1350,9 @@ class ContextMenuHandler:
     
     def _handle_script_action(self, choice, file_path, filename):
         """Handle script menu action"""
+        if not choice or not choice[1]:
+            return
+        
         action = choice[1]
         
         try:
@@ -1434,6 +1453,8 @@ class ContextMenuHandler:
         """Context menu for archive files"""
         try:
             menu_items = [
+                (" <-- Back", "back"),
+                (" <-- Back", "back"),
                 ("Cancel", None),
                 ("View the archive contents", "view"),
                 ("Extract the archive contents", "extract"),
@@ -1451,6 +1472,9 @@ class ContextMenuHandler:
     
     def _handle_archive_action(self, choice, file_path, filename):
         """Handle archive menu action"""
+        if not choice or not choice[1]:
+            return
+        
         action = choice[1]
         
         try:
@@ -1482,6 +1506,8 @@ class ContextMenuHandler:
         """Context menu for IPK packages"""
         try:
             menu_items = [
+                (" <-- Back", "back"),
+                (" <-- Back", "back"),
                 ("Cancel", None),
                 ("View the package contents", "view"),
                 ("Extract the package contents", "extract"),
@@ -1500,6 +1526,9 @@ class ContextMenuHandler:
     
     def _handle_package_action(self, choice, file_path, filename):
         """Handle package menu action"""
+        if not choice or not choice[1]:
+            return
+        
         action = choice[1]
         
         try:
@@ -1605,6 +1634,8 @@ class ContextMenuHandler:
         """Context menu for video files"""
         try:
             menu_items = [
+                (" <-- Back", "back"),
+                (" <-- Back", "back"),
                 ("Cancel", None),
                 ("Play media file", "play"),
                 ("View file info", "info"),
@@ -1648,13 +1679,22 @@ class ContextMenuHandler:
             
             # Build menu items
             menu_items = [
+                (" <-- Back", "back"),
+                (" <-- Back", "back"),
                 ("Cancel", None),
                 ("🎵 Play this audio file", "play_single"),
             ]
             
             # Add "Play all" option if multiple audio files found
             if len(audio_files) > 1:
-                menu_items.append((f"🎶 Play all {len(audio_files)} audio files in directory", "play_all"))
+                menu_items.append(("🎵 Play all audio files in directory", "play_all"))
+            
+            # Add other common options
+            menu_items.extend([
+                ("📄 File info", "info"),
+                ("📋 Copy to other pane", "copy_other"),
+                ("📋 Move to other pane", "move_other"),
+            ])
             
             # Show menu
             self.main.session.openWithCallback(
@@ -1666,8 +1706,12 @@ class ContextMenuHandler:
         except Exception as e:
             logger.error(f"Error showing audio menu: {e}")
             self.dialogs.show_message(f"Audio menu error: {e}", type="error")
+    
     def _handle_audio_action(self, choice, file_path, filename, audio_files):
         """Handle audio menu action"""
+        if not choice or not choice[1]:
+            return
+        
         action = choice[1]
         
         try:
@@ -1723,10 +1767,12 @@ class ContextMenuHandler:
         except Exception as e:
             logger.error(f"Error playing audio playlist: {e}")
             self.dialogs.show_message(f"Playlist error: {e}", type="error")
-
     
     def _handle_media_action(self, choice, file_path, filename):
         """Handle media menu action"""
+        if not choice or not choice[1]:
+            return
+        
         action = choice[1]
         
         try:
@@ -1742,30 +1788,12 @@ class ContextMenuHandler:
             logger.error(f"Error handling media action: {e}")
             self.dialogs.show_message(f"Media action error: {e}", type="error")
     
-    def _show_audio_menu(self, file_path, filename):
-        """Context menu for audio files"""
-        try:
-            menu_items = [
-                ("Cancel", None),
-                ("Play audio file", "play"),
-                ("View file info", "info"),
-                ("Copy to other pane", "copy_other"),
-            ]
-            
-            self.main.session.openWithCallback(
-                lambda choice: self._handle_media_action(choice, file_path, filename) if choice and choice[1] else None,
-                ChoiceBox,
-                title="Audio: " + filename,
-                list=menu_items
-            )
-        except Exception as e:
-            logger.error(f"Error showing audio menu: {e}")
-            self.dialogs.show_message(f"Audio menu error: {e}", type="error")
-    
     def _show_image_menu(self, file_path, filename):
         """Context menu for image files"""
         try:
             menu_items = [
+                (" <-- Back", "back"),
+                (" <-- Back", "back"),
                 ("Cancel", None),
                 ("View image", "view"),
                 ("View file info", "info"),
@@ -1784,6 +1812,9 @@ class ContextMenuHandler:
     
     def _handle_image_action(self, choice, file_path, filename):
         """Handle image menu action"""
+        if not choice or not choice[1]:
+            return
+        
         action = choice[1]
         
         try:
@@ -1801,6 +1832,8 @@ class ContextMenuHandler:
         """Context menu for text files"""
         try:
             menu_items = [
+                (" <-- Back", "back"),
+                (" <-- Back", "back"),
                 ("Cancel", None),
                 ("View/Edit text file", "view"),
                 ("View file info", "info"),
@@ -1819,6 +1852,9 @@ class ContextMenuHandler:
     
     def _handle_text_action(self, choice, file_path, filename):
         """Handle text menu action"""
+        if not choice or not choice[1]:
+            return
+        
         action = choice[1]
         
         try:

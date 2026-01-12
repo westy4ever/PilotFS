@@ -28,42 +28,47 @@ logger = get_logger(__name__)
 
 
 class MoviePlayerWithDirectExit(MoviePlayer):
-    """Custom MoviePlayer that handles EXIT key directly without STOP."""
+    """Custom MoviePlayer with single-prompt exit and Resume support."""
     
     def __init__(self, session, service, main_screen_ref):
         MoviePlayer.__init__(self, session, service)
         self.main_screen_ref = main_screen_ref
+        self.service = service
         
-        # Override actions to intercept EXIT/CANCEL
+        # Priority -1 ensures we catch the key BEFORE the system player does
+        # We only map 'cancel' to avoid the double-trigger bug
         self["actions"] = ActionMap(["MoviePlayerActions", "OkCancelActions"],
         {
-            "cancel": self.askLeavePlayer,  # EXIT key
-            "exit": self.askLeavePlayer,     # Alternative EXIT
-            "leavePlayer": self.askLeavePlayer,
-        }, -2)
-    
+            "cancel": self.askLeavePlayer,
+            "exit": self.askLeavePlayer,
+        }, -1)
+
     def askLeavePlayer(self):
-        """Ask for exit confirmation when EXIT is pressed."""
-        # Stop playback first
-        self.session.nav.stopService()
+        """Standard Enigma2 exit prompt that handles resume points automatically."""
+        from Screens.MessageBox import MessageBox
         
-        # Show exit confirmation via main screen
-        if hasattr(self, 'main_screen_ref') and self.main_screen_ref:
-            self.main_screen_ref.dialogs.show_video_exit_confirmation(
-                lambda confirmed: self.exitConfirmed(confirmed)
-            )
-        else:
-            # Fallback: just close
-            self.close()
-    
+        # We do NOT call stopService here (that causes the double popup)
+        # Instead, we just open the confirmation dialog
+        self.session.openWithCallback(
+            self.exitConfirmed,
+            MessageBox,
+            "Stop playing and save resume point?",
+            MessageBox.TYPE_YESNO
+        )
+
     def exitConfirmed(self, confirmed):
-        """Handle exit confirmation result."""
+        """Handles the result of the exit prompt."""
         if confirmed:
-            # User confirmed exit
+            # Tell the service to save the current position to the .cuts file
+            try:
+                service = self.session.nav.getCurrentService()
+                if service:
+                    # Closing the player service normally saves the position
+                    self.session.nav.stopService()
+            except:
+                pass
             self.close()
-        else:
-            # User cancelled - resume playback
-            self.session.nav.playService(self.service)
+        # If 'No', we do nothing and the video continues playing
 
 
 class PilotFSMain(Screen):
@@ -100,6 +105,33 @@ class PilotFSMain(Screen):
         
         # Start
         self.onLayoutFinish.append(self.startup)
+
+    def close(self):
+        """Logic executed when the user exits the main file manager"""
+        try:
+            from Components.config import config
+            p = config.plugins.pilotfs
+            
+            # Save current paths if enabled in the settings menu
+            # We use .current_directory because that is standard for FilePane components
+            if p.save_left_on_exit.value == "yes":
+                if hasattr(self.left_pane, 'current_directory'):
+                    p.left_path.value = self.left_pane.current_directory
+                    p.left_path.save()
+                
+            if p.save_right_on_exit.value == "yes":
+                if hasattr(self.right_pane, 'current_directory'):
+                    p.right_path.value = self.right_pane.current_directory
+                    p.right_path.save()
+            
+            config.save() # Writes everything to /etc/enigma2/settings
+            
+        except Exception as e:
+            print("[PilotFS] Error saving paths on close: %s" % str(e))
+
+        # IMPORTANT: Always call the parent Screen close at the end
+        from Screens.Screen import Screen
+        Screen.close(self)    
 
     def setup_ui(self, w, h, pane_width, pane_height):
         """Setup user interface"""
@@ -215,7 +247,8 @@ class PilotFSMain(Screen):
             "MenuActions", "NumberActions", "ChannelSelectBaseActions"
         ], {
             "ok": self.ok_pressed,
-            "cancel": self.close_plugin,
+            "cancel": self.exit,
+            "exit": self.exit,
             "up": self.up,
             "down": self.down,
             "left": self.focus_left,
@@ -1479,6 +1512,39 @@ class PilotFSMain(Screen):
             
             logger.info("PilotFS shutdown complete")
             self.close()
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
+            self.close()
+    def exit(self):
+        """Handle exit and save paths if configured"""
+        try:
+            # 1. Access the plugin config
+            p = self.config.plugins.pilotfs 
+            
+            # 2. Check if saving is enabled in the settings menu
+            if p.save_left_on_exit.value == "yes":
+                # Save the current directory of the left pane
+                # Replace 'left_pane' with whatever name you used for your left FileList/Pane
+                if hasattr(self, 'left_pane'):
+                    current_left = self.left_pane.getCurrentDirectory()
+                    if current_left:
+                        p.left_path.value = current_left
+                        p.left_path.save()
+                
+            if p.save_right_on_exit.value == "yes":
+                if hasattr(self, 'right_pane'):
+                    current_right = self.right_pane.getCurrentDirectory()
+                    if current_right:
+                        p.right_path.value = current_right
+                        p.right_path.save()
+            
+            # 3. Commit to /etc/enigma2/settings
+            from Components.config import config
+            config.save()
+            
+            logger.info("PilotFS: Paths saved on exit.")
+            self.close() # Now close the screen
+            
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
             self.close()

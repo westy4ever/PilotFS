@@ -9,7 +9,6 @@ import hashlib
 from datetime import datetime
 import glob
 
-from ..ui.setup_screen import PilotFSSetup
 from ..utils.formatters import format_size, get_file_icon
 from ..utils.logging_config import get_logger
 from ..constants import TRASH_PATH, LOG_FILE
@@ -1626,5 +1625,6 @@ class Dialogs:
     # Property for SetupScreen
     @property
     def SetupScreen(self):
-        """Get setup screen class"""
+        """Get setup screen class - Imported here to avoid circular dependency"""
+        from ..ui.setup_screen import PilotFSSetup # <--- ADD THIS LINE HERE
         return PilotFSSetup
