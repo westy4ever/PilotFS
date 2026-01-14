@@ -74,31 +74,6 @@ class PilotFSConfig:
         if not hasattr(p, 'fallback_to_external'):
             p.fallback_to_external = ConfigYesNo(default=True)
 
-        # --- AJPanel-Style Network Settings ---
-        if not hasattr(p, 'network_timeout'):
-            p.network_timeout = ConfigInteger(default=3, limits=(1, 30))
-        if not hasattr(p, 'ping_timeout'):
-            p.ping_timeout = ConfigInteger(default=2, limits=(1, 10))
-        if not hasattr(p, 'port_scan_timeout'):
-            p.port_scan_timeout = ConfigInteger(default=1, limits=(1, 5))
-        if not hasattr(p, 'auto_reconnect'):
-            p.auto_reconnect = ConfigYesNo(default=True)
-        if not hasattr(p, 'max_reconnect_attempts'):
-            p.max_reconnect_attempts = ConfigInteger(default=3, limits=(1, 10))
-        if not hasattr(p, 'connection_check'):
-            p.connection_check = ConfigYesNo(default=True)
-        if not hasattr(p, 'network_scan_range'):
-            p.network_scan_range = ConfigSelection(
-                default="192.168.1", 
-                choices=[
-                    ("192.168.0", "192.168.0.x"),
-                    ("192.168.1", "192.168.1.x"), 
-                    ("192.168.2", "192.168.2.x"),
-                    ("192.168.10", "192.168.10.x"),
-                    ("192.168.100", "192.168.100.x"),
-                ]
-            )
-        
         # --- Remote Access ---
         if not hasattr(p, 'remote_ip'):
             p.remote_ip = ConfigText(default="192.168.1.10", fixed_size=False)
@@ -223,13 +198,6 @@ class PilotFSConfig:
             p.save_right_on_exit.value = "yes"
             p.use_internal_player.value = True
             p.fallback_to_external.value = True
-            p.network_timeout.value = 3
-            p.ping_timeout.value = 2
-            p.port_scan_timeout.value = 1
-            p.auto_reconnect.value = True
-            p.max_reconnect_attempts.value = 3
-            p.connection_check.value = True
-            p.network_scan_range.value = "192.168.1"
             p.remote_ip.value = "192.168.1.10"
             p.ftp_host.value = ""
             p.ftp_port.value = 21
@@ -253,17 +221,3 @@ class PilotFSConfig:
         except Exception as e:
             logger.error(f"Error resetting to defaults: {e}")
             return False
-
-    def get_network_settings(self):
-        """Get all network-related settings"""
-        p = self.plugins.pilotfs
-        return {
-            'network_timeout': p.network_timeout.value,
-            'ping_timeout': p.ping_timeout.value,
-            'port_scan_timeout': p.port_scan_timeout.value,
-            'auto_reconnect': p.auto_reconnect.value,
-            'max_reconnect_attempts': p.max_reconnect_attempts.value,
-            'connection_check': p.connection_check.value,
-            'network_scan_range': p.network_scan_range.value,
-            'remote_ip': p.remote_ip.value,
-        }
