@@ -3,6 +3,8 @@ import os
 import time
 import tempfile
 import shlex
+import socket
+import threading
 from ..constants import DEFAULT_CIFS_VERSION, DEFAULT_TIMEOUT
 from ..exceptions import NetworkError, RemoteConnectionError
 from ..utils.validators import validate_ip, validate_hostname, sanitize_string
@@ -13,9 +15,257 @@ class MountManager:
         self.config = config
         self.timeout = DEFAULT_TIMEOUT
         self.mount_points = {}
+        self.ping_cache = {}
+        self.scan_results = {}
+    
+    # ============================================================================
+    # AJPanel-STYLE NETWORK FEATURES
+    # ============================================================================
+    
+    def quick_ping(self, host, count=1, timeout=None):
+        """AJPanel-style quick ping with caching"""
+        try:
+            if timeout is None:
+                timeout = self.config.plugins.pilotfs.ping_timeout.value
+            
+            # Check cache first (5 minute cache)
+            cache_key = f"{host}_{count}_{timeout}"
+            if cache_key in self.ping_cache:
+                cache_time, result = self.ping_cache[cache_key]
+                if time.time() - cache_time < 300:  # 5 minutes
+                    return result
+            
+            cmd = ["ping", "-c", str(count), "-W", str(timeout), host]
+            
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=timeout + 2
+            )
+            
+            is_reachable = result.returncode == 0
+            
+            # Parse latency if available
+            latency = None
+            if is_reachable and result.stdout:
+                import re
+                match = re.search(r'time=([\d.]+)\s*ms', result.stdout)
+                if match:
+                    latency = float(match.group(1))
+            
+            result_data = {
+                'reachable': is_reachable,
+                'latency': latency,
+                'output': result.stdout[:200] + result.stderr[:200],
+                'timestamp': time.time()
+            }
+            
+            # Cache result
+            self.ping_cache[cache_key] = (time.time(), result_data)
+            
+            return result_data
+            
+        except subprocess.TimeoutExpired:
+            return {
+                'reachable': False,
+                'latency': None,
+                'output': 'Ping timeout',
+                'timestamp': time.time()
+            }
+        except Exception as e:
+            return {
+                'reachable': False,
+                'latency': None,
+                'output': str(e),
+                'timestamp': time.time()
+            }
+    
+    def check_port(self, host, port, timeout=None):
+        """Check if a port is open"""
+        try:
+            if timeout is None:
+                timeout = self.config.plugins.pilotfs.port_scan_timeout.value
+            
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            
+            start_time = time.time()
+            result = sock.connect_ex((host, port))
+            elapsed = (time.time() - start_time) * 1000
+            
+            sock.close()
+            
+            return {
+                'open': result == 0,
+                'response_time': elapsed,
+                'timestamp': time.time()
+            }
+            
+        except Exception as e:
+            return {
+                'open': False,
+                'error': str(e),
+                'timestamp': time.time()
+            }
+    
+    def network_discovery_async(self, subnet=None, callback=None):
+        """Asynchronous network discovery like AJPanel"""
+        try:
+            if subnet is None:
+                subnet = self.config.plugins.pilotfs.network_scan_range.value
+            
+            base_ip = subnet.rstrip('.') + '.'
+            active_hosts = []
+            results = {}
+            threads = []
+            
+            def scan_host(ip):
+                try:
+                    result = self.quick_ping(ip, count=1, timeout=1)
+                    results[ip] = result
+                    if result['reachable']:
+                        active_hosts.append(ip)
+                    
+                    # Call callback if provided
+                    if callback:
+                        callback(ip, result)
+                        
+                except Exception:
+                    results[ip] = {'reachable': False, 'error': 'Scan error'}
+            
+            # Create threads for scanning
+            for i in range(1, 255):
+                ip = f"{base_ip}{i}"
+                thread = threading.Thread(target=scan_host, args=(ip,))
+                thread.daemon = True
+                threads.append(thread)
+                thread.start()
+            
+            # Wait for completion with timeout
+            for thread in threads:
+                thread.join(timeout=0.1)
+            
+            # Store results
+            self.scan_results[subnet] = {
+                'active_hosts': active_hosts,
+                'results': results,
+                'timestamp': time.time(),
+                'total_scanned': 254
+            }
+            
+            return active_hosts
+            
+        except Exception as e:
+            return []
+    
+    def get_network_interfaces(self):
+        """Get network interface information"""
+        try:
+            result = subprocess.run(
+                ["ifconfig"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            interfaces = []
+            current_interface = None
+            
+            for line in result.stdout.split('\n'):
+                if line and not line.startswith(' '):
+                    # New interface
+                    if current_interface:
+                        interfaces.append(current_interface)
+                    
+                    interface_name = line.split(':')[0]
+                    current_interface = {
+                        'name': interface_name,
+                        'lines': [line.strip()]
+                    }
+                elif current_interface:
+                    current_interface['lines'].append(line.strip())
+            
+            if current_interface:
+                interfaces.append(current_interface)
+            
+            return interfaces
+            
+        except Exception as e:
+            return []
+    
+    def get_dns_info(self):
+        """Get DNS configuration information"""
+        try:
+            dns_info = {}
+            
+            # Read /etc/resolv.conf
+            if os.path.exists("/etc/resolv.conf"):
+                with open("/etc/resolv.conf", "r") as f:
+                    dns_info['resolv_conf'] = f.read()
+            
+            # Try to get DNS servers via nslookup
+            try:
+                result = subprocess.run(
+                    ["nslookup", "google.com"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                dns_info['nslookup'] = result.stdout
+            except:
+                dns_info['nslookup'] = "nslookup not available"
+            
+            return dns_info
+            
+        except Exception as e:
+            return {'error': str(e)}
+    
+    def run_network_command(self, command, timeout=10):
+        """Run a network diagnostic command"""
+        try:
+            result = subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
+            
+            return {
+                'success': result.returncode == 0,
+                'stdout': result.stdout,
+                'stderr': result.stderr,
+                'returncode': result.returncode,
+                'command': command
+            }
+            
+        except subprocess.TimeoutExpired:
+            return {
+                'success': False,
+                'error': 'Command timed out',
+                'command': command
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e),
+                'command': command
+            }
+    
+    # ============================================================================
+    # ORIGINAL MOUNT METHODS (Enhanced with network checks)
+    # ============================================================================
     
     def mount_cifs(self, server, share, mount_point, username="", password="", domain="", options=None):
-        """Mount CIFS/SMB share"""
+        """Mount CIFS/SMB share with pre-flight network check"""
+        # First check if server is reachable
+        if self.config.plugins.pilotfs.connection_check.value:
+            ping_result = self.quick_ping(server)
+            if not ping_result['reachable']:
+                return False, f"Server unreachable: {server}. Please check network connection."
+        
         creds_file = None
         try:
             # Validate inputs
@@ -96,7 +346,8 @@ class MountManager:
                     'type': 'cifs',
                     'server': server,
                     'share': share,
-                    'options': mount_options
+                    'options': mount_options,
+                    'mounted_at': time.time()
                 }
                 return True, f"Mounted //{server}/{share} to {mount_point}"
             else:
@@ -141,7 +392,8 @@ class MountManager:
                             'type': 'cifs',
                             'server': server,
                             'share': share,
-                            'options': new_options
+                            'options': new_options,
+                            'mounted_at': time.time()
                         }
                         return True, f"Mounted with vers={version}"
                 
@@ -261,10 +513,10 @@ class MountManager:
             if not validate_ip(server) and not validate_hostname(server):
                 return False, "Invalid server address: %s" % server
             
-            # First test if server is reachable
-            ping_success, ping_msg = self.test_ping(server)
-            if not ping_success:
-                return False, "Server unreachable: %s. Check IP address and network." % server
+            # First test if server is reachable with enhanced ping
+            ping_result = self.quick_ping(server)
+            if not ping_result['reachable']:
+                return False, f"Server unreachable: {server}. Ping output: {ping_result.get('output', 'No output')}"
             
             # Check if smbclient is available
             smb_check = subprocess.run(
@@ -321,27 +573,20 @@ class MountManager:
         except Exception as e:
             return False, "Scan error: %s" % str(e)
     
-
     def test_ping(self, host):
         """Ping host to test connectivity"""
         try:
             if not validate_ip(host) and not validate_hostname(host):
                 return False, f"Invalid host: {host}"
             
-            result = subprocess.run(
-                ["ping", "-c", "2", "-W", "2", host],
-                capture_output=True,
-                timeout=5,
-                text=True
-            )
+            result = self.quick_ping(host)
             
-            if result.returncode == 0:
-                return True, "Ping successful"
+            if result['reachable']:
+                latency_msg = f" (latency: {result['latency']}ms)" if result['latency'] else ""
+                return True, f"Host reachable{latency_msg}"
             else:
-                return False, "Host unreachable"
+                return False, f"Host unreachable: {result.get('output', 'No output')}"
                 
-        except subprocess.TimeoutExpired:
-            return False, "Ping timeout"
         except Exception as e:
             return False, f"Ping error: {e}"
     
@@ -400,3 +645,27 @@ class MountManager:
             
         except Exception as e:
             return False, f"Cleanup mounts error: {e}"
+    
+    def get_network_stats(self):
+        """Get network statistics"""
+        stats = {
+            'ping_cache_size': len(self.ping_cache),
+            'scan_results': len(self.scan_results),
+            'mount_points': len(self.mount_points),
+            'timestamp': time.time()
+        }
+        
+        # Get some recent ping results
+        recent_pings = []
+        for host, result in list(self.ping_cache.values())[-5:]:
+            if isinstance(result, tuple):  # Handle cached tuples
+                result = result[1]
+            recent_pings.append({
+                'host': host.split('_')[0],  # Extract host from cache key
+                'reachable': result.get('reachable', False),
+                'latency': result.get('latency'),
+                'age': int(time.time() - result.get('timestamp', 0))
+            })
+        
+        stats['recent_pings'] = recent_pings
+        return stats

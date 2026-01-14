@@ -22,6 +22,13 @@ from ..utils.formatters import get_file_icon, format_size
 from ..utils.logging_config import get_logger
 from .context_menu import ContextMenuHandler
 from .dialogs import Dialogs
+from .dialogs import (
+    show_network_tools_menu,
+    show_network_diagnostics_dialog,
+    show_port_scanner_dialog,
+    quick_ping_host,
+    test_connection_with_diagnostics
+)
 
 
 logger = get_logger(__name__)
@@ -272,7 +279,8 @@ class PilotFSMain(Screen):
         self["actions"] = ActionMap([
             "PilotFSActions",
             "OkCancelActions", "ColorActions", "DirectionActions", 
-            "MenuActions", "NumberActions", "ChannelSelectBaseActions"
+            "MenuActions", "NumberActions", "ChannelSelectBaseActions",
+            "NetworkActions"
         ], {
             "ok": self.ok_pressed,
             "cancel": self.exit,
@@ -310,6 +318,10 @@ class PilotFSMain(Screen):
             "pageDown": lambda: self.page_down(),
             "home": lambda: self.go_home(),
             "end": lambda: self.go_end(),
+            # Network actions
+            "blue": self.show_network_tools,
+            "yellow": self.quick_network_ping,
+            "red": self.show_network_diagnostics,
         }, -1)
 
     def startup(self):
@@ -442,6 +454,15 @@ class PilotFSMain(Screen):
                 status_text = "✓ SELECTED: %d items | Current: %s" % (count, current_name)
             else:
                 status_text = "Path: %s" % self.active_pane.getCurrentDirectory()
+            
+            # Add network status
+            try:
+                stats = self.remote_mgr.get_connection_stats()
+                if stats['total'] > 0:
+                    network_status = f" | 📡 {stats['online']}/{stats['total']}"
+                    status_text += network_status
+            except:
+                pass
 
             # 4. Update the Label widget in the skin
             self["status_bar"].setText(status_text)
@@ -1694,3 +1715,76 @@ class PilotFSMain(Screen):
         except Exception as e:
             logger.error(f"Error deleting multiple items: {e}")
             self.dialogs.show_message(f"Delete multiple failed: {e}", type="error")
+
+    # ===== NETWORK METHODS =====
+    def show_network_tools(self):
+        """Show AJPanel-style network tools menu"""
+        show_network_tools_menu(
+            self.session,
+            self.remote_mgr,
+            self.mount_mgr,
+            self.active_pane
+        )
+
+    def quick_network_ping(self):
+        """Quick ping current selection or ask for host"""
+        try:
+            # Check current selection
+            sel = self.active_pane.getSelection()
+            if sel and sel[0]:
+                item_path = sel[0]
+                
+                # Check if it's a network path
+                if item_path.startswith(('ftp://', 'sftp://', 'webdav://')):
+                    from ..network.network_browser import NetworkBrowser
+                    browser = NetworkBrowser(self.config)
+                    parsed = browser.parse_network_path(item_path)
+                    if parsed:
+                        quick_ping_host(self.session, parsed['host'])
+                        return
+                
+                # Check mounted network share
+                mount_info = self.mount_mgr.get_mount_info(item_path)
+                if mount_info and 'source' in mount_info:
+                    source = mount_info['source']
+                    if '//' in source:
+                        host = source.split('//')[1].split('/')[0]
+                        quick_ping_host(self.session, host)
+                        return
+            
+            # No network context, ask for host
+            quick_ping_host(self.session, None)
+            
+        except Exception as e:
+            logger.error(f"Quick ping error: {e}")
+            self.dialogs.show_message(f"Ping error: {str(e)}", type="error")
+
+    def show_network_diagnostics(self):
+        """Show comprehensive network diagnostics"""
+        show_network_diagnostics_dialog(
+            self.session,
+            self.remote_mgr,
+            self.mount_mgr
+        )
+
+    def show_connection_diagnostics(self, connection_name):
+        """Show diagnostics for a specific connection"""
+        test_connection_with_diagnostics(
+            self.session,
+            self.remote_mgr,
+            connection_name
+        )
+
+    def show_port_scanner(self, host=None):
+        """Show port scanner"""
+        if not host:
+            # Ask for host
+            from Screens.VirtualKeyBoard import VirtualKeyBoard
+            self.session.openWithCallback(
+                lambda h: show_port_scanner_dialog(self.session, self.remote_mgr, h) if h else None,
+                VirtualKeyBoard,
+                title="Enter host to scan:",
+                text="192.168.1.1"
+            )
+        else:
+            show_port_scanner_dialog(self.session, self.remote_mgr, host)
