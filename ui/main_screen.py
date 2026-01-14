@@ -31,10 +31,11 @@ logger = get_logger(__name__)
 class MoviePlayerWithDirectExit(MoviePlayer):
     """Custom MoviePlayer with single-prompt exit and Resume support."""
     
-    def __init__(self, session, service, main_screen_ref):
+    def __init__(self, session, service, main_screen_ref, file_path):
         MoviePlayer.__init__(self, session, service)
         self.main_screen_ref = main_screen_ref
         self.service = service
+        self.file_path = file_path
         
         # Priority -1 ensures we catch the key BEFORE the system player does
         # We only map 'cancel' to avoid the double-trigger bug
@@ -45,31 +46,39 @@ class MoviePlayerWithDirectExit(MoviePlayer):
         }, -1)
 
     def askLeavePlayer(self):
-        """Standard Enigma2 exit prompt that handles resume points automatically."""
+        """Ask to exit and save resume point."""
         from Screens.MessageBox import MessageBox
         
-        # We do NOT call stopService here (that causes the double popup)
-        # Instead, we just open the confirmation dialog
         self.session.openWithCallback(
             self.exitConfirmed,
             MessageBox,
-            "Stop playing and save resume point?",
+            "Exit media player?\n\n(Resume point will be saved automatically)",
             MessageBox.TYPE_YESNO
         )
 
     def exitConfirmed(self, confirmed):
-        """Handles the result of the exit prompt."""
+        """Handle exit confirmation and save resume point."""
         if confirmed:
-            # Tell the service to save the current position to the .cuts file
             try:
+                # Get current playback position
                 service = self.session.nav.getCurrentService()
                 if service:
-                    # Closing the player service normally saves the position
-                    self.session.nav.stopService()
-            except:
-                pass
+                    seek = service.seek()
+                    if seek:
+                        position = seek.getPlayPosition()
+                        if position and position[1] > 0:
+                            current_pos = position[1] / 90000  # Convert to seconds
+                            
+                            # Save resume point
+                            self.main_screen_ref.save_resume_point(self.file_path, current_pos)
+                            logger.info(f"Saved resume point: {current_pos}s for {self.file_path}")
+                
+                # Stop service and close
+                self.session.nav.stopService()
+            except Exception as e:
+                logger.error(f"Error saving resume point: {e}")
+            
             self.close()
-        # If 'No', we do nothing and the video continues playing
 
 
 class PilotFSMain(Screen):
@@ -104,6 +113,11 @@ class PilotFSMain(Screen):
         # 3. Initialize state (MOVE THIS HERE)
         self.marked_files = set()
         self.active_pane = None # Good practice to define this early
+        
+        # ===== ADD THESE LINES =====
+        # Resume points storage
+        self.resume_points = self._load_resume_points()
+        # ===== END ADD =====
         
         # 4. Initialize UI components
         self.dialogs = Dialogs(self.session)
@@ -1377,51 +1391,42 @@ class PilotFSMain(Screen):
             logger.warning(f"Missing tools: {', '.join(missing)}")
 
     def movie_player_callback(self, *args):
-        """Callback when movie player closes - ask for exit confirmation"""
-        logger.info("Movie player closed, showing exit confirmation")
+        """Callback when movie player closes"""
+        logger.info("Movie player closed")
         
-        # Show exit confirmation dialog
-        self.dialogs.show_video_exit_confirmation(self.movie_player_exit_confirmed)
-    
-    def movie_player_exit_confirmed(self, confirmed):
-        """Handle video exit confirmation result"""
-        if confirmed:
-            logger.info("User confirmed exit from video player")
-            self.preview_in_progress = False
-            self.update_ui()
-        else:
-            logger.info("User cancelled exit, returning to video")
-            # User chose not to exit - reopen the video
-            sel = self.active_pane.getSelection()
-            if sel and sel[0]:
-                file_path = sel[0]
-                if self.can_play_file(file_path):
-                    # Replay the video
-                    self.preview_media()
+        # Reset preview flag
+        self.preview_in_progress = False
+        self.update_ui()
 
     def play_media_file(self, path):
-        """Play media file using Enigma2 service player"""
+        """Play media file using Enigma2 service player with resume support"""
         try:
             from enigma import eServiceReference
-            from Screens.InfoBar import MoviePlayer
             
             logger.info(f"Playing: {path}")
             
-            # Create service reference (4097 = gstreamer)
-            ref = eServiceReference(4097, 0, path)
-            ref.setName(os.path.basename(path))
+            # Check for existing resume point
+            resume_point = self.get_resume_point(path)
             
-            # Open MoviePlayer with callback
-            # Use custom player that handles EXIT key properly
-            self.session.openWithCallback(
-                self.movie_player_callback,
-                MoviePlayerWithDirectExit,
-                ref,
-                self  # Pass main_screen reference for exit confirmation
-            )
+            if resume_point and resume_point.get('position', 0) > 10:
+                # Show resume dialog
+                position = resume_point['position']
+                minutes = int(position / 60)
+                seconds = int(position % 60)
+                
+                self.dialogs.show_confirmation(
+                    f"Resume playback?\n\n"
+                    f"File: {os.path.basename(path)}\n"
+                    f"Last position: {minutes}m {seconds}s\n\n"
+                    f"YES = Resume from {minutes}m {seconds}s\n"
+                    f"NO = Start from beginning",
+                    lambda res: self._start_playback_with_resume(path, position if res else 0)
+                )
+            else:
+                # No resume point, start from beginning
+                self._start_playback_with_resume(path, 0)
             
         except ImportError:
-            # Final fallback - external player
             logger.warning("Enigma2 player not available, using external")
             self.play_with_external_player(path)
         except Exception as e:
@@ -1430,6 +1435,47 @@ class PilotFSMain(Screen):
                 f"Cannot play media file:\n{os.path.basename(path)}\n\nError: {e}",
                 type="error"
             )
+    
+    def _start_playback_with_resume(self, path, resume_position):
+        """Start playback with optional resume position"""
+        try:
+            from enigma import eServiceReference
+            
+            # Create service reference
+            ref = eServiceReference(4097, 0, path)
+            ref.setName(os.path.basename(path))
+            
+            # Open custom player
+            self.session.openWithCallback(
+                self.movie_player_callback,
+                MoviePlayerWithDirectExit,
+                ref,
+                self,  # main_screen reference
+                path   # file_path for resume saving
+            )
+            
+            # If resume position > 0, seek after a small delay
+            if resume_position > 0:
+                import threading
+                
+                def seek_to_position():
+                    time.sleep(1)  # Wait for player to fully initialize
+                    try:
+                        service = self.session.nav.getCurrentService()
+                        if service:
+                            seek = service.seek()
+                            if seek:
+                                # Convert seconds to 90kHz ticks
+                                seek.seekTo(int(resume_position * 90000))
+                                logger.info(f"Resumed playback at {resume_position}s")
+                    except Exception as e:
+                        logger.error(f"Error seeking to resume position: {e}")
+                
+                threading.Thread(target=seek_to_position, daemon=True).start()
+            
+        except Exception as e:
+            logger.error(f"Error starting playback: {e}")
+            self.dialogs.show_message(f"Playback error: {e}", type="error")
 
     def play_with_external_player(self, path):
         """Play with external player as fallback"""
@@ -1572,7 +1618,53 @@ class PilotFSMain(Screen):
         """Return summary text to avoid skin errors"""
         return "PilotFS File Manager"
 
-    # Helper method for delete multiple
+    # ===== ADD THESE METHODS =====
+    def _load_resume_points(self):
+        """Load resume points from file"""
+        import json
+        resume_file = "/tmp/pilotfs_resume.json"
+        try:
+            if os.path.exists(resume_file):
+                with open(resume_file, 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            logger.error(f"Error loading resume points: {e}")
+        return {}
+    
+    def _save_resume_points(self):
+        """Save resume points to file"""
+        import json
+        resume_file = "/tmp/pilotfs_resume.json"
+        try:
+            with open(resume_file, 'w') as f:
+                json.dump(self.resume_points, f, indent=2)
+        except Exception as e:
+            logger.error(f"Error saving resume points: {e}")
+    
+    def save_resume_point(self, file_path, position_seconds):
+        """Save resume point for a file"""
+        try:
+            self.resume_points[file_path] = {
+                'position': position_seconds,
+                'timestamp': time.time(),
+                'filename': os.path.basename(file_path)
+            }
+            self._save_resume_points()
+            logger.info(f"Resume point saved: {position_seconds}s for {os.path.basename(file_path)}")
+        except Exception as e:
+            logger.error(f"Error saving resume point: {e}")
+    
+    def get_resume_point(self, file_path):
+        """Get resume point for a file"""
+        return self.resume_points.get(file_path)
+    
+    def clear_resume_point(self, file_path):
+        """Clear resume point for a file"""
+        if file_path in self.resume_points:
+            del self.resume_points[file_path]
+            self._save_resume_points()
+    # ===== END ADD =====
+
     def _execute_delete_multiple(self, confirmed, files):
         """Execute deletion of multiple items"""
         if not confirmed:
