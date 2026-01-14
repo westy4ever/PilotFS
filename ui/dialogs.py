@@ -1622,9 +1622,3 @@ class Dialogs:
             logger.error(f"Error showing bulk rename dialog: {e}")
             self.show_message(f"Bulk rename dialog error: {e}", type="error")
     
-    # Property for SetupScreen
-    @property
-    def SetupScreen(self):
-        """Get setup screen class - Imported here to avoid circular dependency"""
-        from ..ui.setup_screen import PilotFSSetup # <--- ADD THIS LINE HERE
-        return PilotFSSetup

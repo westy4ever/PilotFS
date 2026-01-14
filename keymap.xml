@@ -1,12 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <keymap>
     <context name="PilotFSActions">
+        <!-- Color buttons with both short and long press support -->
         <key id="KEY_YELLOW" mapto="yellow" flags="m" />
         <key id="KEY_YELLOW" mapto="yellow_long" flags="l" />
+        
         <key id="KEY_RED" mapto="red" flags="m" />
+        <key id="KEY_RED" mapto="red_long" flags="l" />
+        
         <key id="KEY_GREEN" mapto="green" flags="m" />
+        <key id="KEY_GREEN" mapto="green_long" flags="l" />
+        
         <key id="KEY_BLUE" mapto="blue" flags="m" />
+        <key id="KEY_BLUE" mapto="blue_long" flags="l" />
+        
+        <!-- Navigation and control buttons -->
         <key id="KEY_MENU" mapto="menu" flags="m" />
+        <key id="KEY_MENU" mapto="menu_long" flags="l" />
+        
         <key id="KEY_OK" mapto="ok" flags="m" />
+        <key id="KEY_OK" mapto="ok_long" flags="l" />
+        
         <key id="KEY_EXIT" mapto="cancel" flags="m" />
+        <key id="KEY_EXIT" mapto="cancel_long" flags="l" />
+        
+        <!-- Directional navigation -->
+        <key id="KEY_UP" mapto="up" flags="m" />
+        <key id="KEY_DOWN" mapto="down" flags="m" />
+        <key id="KEY_LEFT" mapto="left" flags="m" />
+        <key id="KEY_RIGHT" mapto="right" flags="m" />
+        
+        <!-- Playback controls -->
+        <key id="KEY_PLAY" mapto="play" flags="m" />
+        <key id="KEY_PAUSE" mapto="pause" flags="m" />
+        <key id="KEY_STOP" mapto="stop" flags="m" />
+        <key id="KEY_RECORD" mapto="record" flags="m" />
+        
+        <!-- Volume and channel controls -->
+        <key id="KEY_VOLUMEUP" mapto="volume_up" flags="m" />
+        <key id="KEY_VOLUMEDOWN" mapto="volume_down" flags="m" />
+        <key id="KEY_CHANNELUP" mapto="channel_up" flags="m" />
+        <key id="KEY_CHANNELDOWN" mapto="channel_down" flags="m" />
+        
+        <!-- Numeric keys -->
+        <key id="KEY_0" mapto="num_0" flags="m" />
+        <key id="KEY_1" mapto="num_1" flags="m" />
+        <key id="KEY_2" mapto="num_2" flags="m" />
+        <key id="KEY_3" mapto="num_3" flags="m" />
+        <key id="KEY_4" mapto="num_4" flags="m" />
+        <key id="KEY_5" mapto="num_5" flags="m" />
+        <key id="KEY_6" mapto="num_6" flags="m" />
+        <key id="KEY_7" mapto="num_7" flags="m" />
+        <key id="KEY_8" mapto="num_8" flags="m" />
+        <key id="KEY_9" mapto="num_9" flags="m" />
+        
+        <!-- Special function keys -->
+        <key id="KEY_INFO" mapto="info" flags="m" />
+        <key id="KEY_GUIDE" mapto="guide" flags="m" />
+        <key id="KEY_OPTIONS" mapto="options" flags="m" />
+        <key id="KEY_BACK" mapto="back" flags="m" />
+        <key id="KEY_HOME" mapto="home" flags="m" />
+        <key id="KEY_POWER" mapto="power" flags="m" />
+        
+        <!-- Text input support -->
+        <key id="KEY_TEXT" mapto="text_input" flags="m" />
+        <key id="KEY_SUBTITLE" mapto="subtitle" flags="m" />
+        <key id="KEY_AUDIO" mapto="audio" flags="m" />
+        
+        <!-- Media control extensions -->
+        <key id="KEY_FASTFORWARD" mapto="fast_forward" flags="m" />
+        <key id="KEY_REWIND" mapto="rewind" flags="m" />
+        <key id="KEY_NEXT" mapto="next" flags="m" />
+        <key id="KEY_PREVIOUS" mapto="previous" flags="m" />
     </context>
 </keymap>

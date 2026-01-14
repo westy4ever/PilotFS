@@ -156,13 +156,13 @@ class NetworkBrowser:
             return success, msg
             
         elif protocol == 'sftp':
-            password = self.config.plugins.pilotfs.sftp_pass.value
+            password = config.plugins.pilotfs.sftp_pass.value
             return sftp_client.download_file(host, port, username, password, path, local_path)
             
         elif protocol == 'webdav':
-            password = self.config.plugins.pilotfs.webdav_pass.value
-            username = self.config.plugins.pilotfs.webdav_user.value
-            url = self.config.plugins.pilotfs.webdav_url.value + path
+            password = config.plugins.pilotfs.webdav_pass.value
+            username = config.plugins.pilotfs.webdav_user.value
+            url = config.plugins.pilotfs.webdav_url.value + path
             return webdav_client.download_file(url, local_path, username, password)
         
         else:

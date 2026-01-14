@@ -26,6 +26,7 @@ class PilotFSConfig:
         # Ensure config.plugins.pilotfs exists
         if not hasattr(config.plugins, 'pilotfs'):
             config.plugins.pilotfs = ConfigSubsection()
+
         
         p = config.plugins.pilotfs
         

@@ -3,7 +3,7 @@ from Screens.Screen import Screen
 from Screens.MessageBox import MessageBox
 from Components.ActionMap import ActionMap
 from Components.Label import Label
-from Components.ConfigList import ConfigListScreen
+from Components.ConfigList import ConfigList, ConfigListScreen
 from Components.config import config, getConfigListEntry, ConfigNothing, configfile
 from enigma import getDesktop
 
@@ -18,9 +18,32 @@ class PilotFSSetup(ConfigListScreen, Screen):
         Screen.__init__(self, session)
         self.session = session
 
-        # Use a distinct name for the settings object
-        from Components.config import config as en_config
-        self.p_config = en_config.plugins.pilotfs
+        # 1. Initialize your custom config subsections
+        from ..core.config import PilotFSConfig
+        self.config_manager = PilotFSConfig()
+        self.config_manager.setup_config()
+
+        # 2. Assign labels and the ACTUAL config widget name
+        self["key_red"] = Label("Cancel")
+        self["key_yellow"] = Label("Defaults")
+        self["key_blue"] = Label("Save")
+        
+        # This is the vital part: The widget must be in self BEFORE ConfigListScreen init
+        self.list = []
+        self["config"] = ConfigList(self.list) 
+        
+        # 3. Now run the init list and the Base Class init
+        self.init_config_list()
+        ConfigListScreen.__init__(self, self.list, session=session)
+
+        # 4. Action Map
+        self["actions"] = ActionMap(["SetupActions", "ColorActions"], {
+            "red": self.key_cancel,
+            "yellow": self.load_defaults,
+            "blue": self.key_save,
+            "cancel": self.key_cancel,
+            "ok": self.key_save, # Standard practice
+        }, -2)
         
         # UI Layout Calculations
         desktop_w, desktop_h = getDesktop(0).size().width(), getDesktop(0).size().height()
@@ -47,12 +70,12 @@ class PilotFSSetup(ConfigListScreen, Screen):
 
             <widget name="key_red" position="110,{button_y+5}" size="200,50" zPosition="1" font="Regular;26" halign="center" valign="center" transparent="1" foregroundColor="#ffffff" />
             <widget name="key_yellow" position="410,{button_y+5}" size="200,50" zPosition="1" font="Regular;26" halign="center" valign="center" transparent="1" foregroundColor="#ffffff" />
-            <widget name="key_blue" position="710,{button_y+5}" size="200,50" zPosition="1" font="Regular;26" halign="center" valign="center" transparent="1" foregroundColor="#ffffff" />
+            <widget name="key_green" position="710,{button_y+5}" size="200,50" zPosition="1" font="Regular;26" halign="center" valign="center" transparent="1" foregroundColor="#ffffff" />
         </screen>"""
         
         self["key_red"] = Label("Cancel")
         self["key_yellow"] = Label("Defaults")
-        self["key_blue"] = Label("Save")
+        self["key_green"] = Label("Save")
         
         self.list = []
         self.init_config_list()
@@ -62,7 +85,7 @@ class PilotFSSetup(ConfigListScreen, Screen):
         self["actions"] = ActionMap(["SetupActions", "ColorActions"], {
             "red": self.key_cancel,
             "yellow": self.load_defaults,
-            "blue": self.key_save,
+            "green": self.key_save,
             "cancel": self.key_cancel,
             "left": self.keyLeft,
             "right": self.keyRight,
@@ -74,9 +97,6 @@ class PilotFSSetup(ConfigListScreen, Screen):
 
         # --- STEP 1: FORCE THE SYSTEM TO RECOGNIZE YOUR PLUGIN ---
         from Components.config import config, ConfigSubsection
-        if not hasattr(config.plugins, 'pilotfs'):
-            config.plugins.pilotfs = ConfigSubsection()
-
         # --- STEP 2: RUN YOUR REGISTRATION ---
         from ..core.config import PilotFSConfig
         self.config_manager = PilotFSConfig()
@@ -142,13 +162,13 @@ class PilotFSSetup(ConfigListScreen, Screen):
             self.list.append(getConfigListEntry("WebDAV Password:", p.webdav_pass))
 
         except AttributeError as e:
-            # If Enigma2 still says a variable is missing, this will print the EXACT name to your console
             print("[PilotFS] ERROR: Missing config variable -> %s" % str(e))
         
         # --- 4. UPDATE UI ---
-        if self["config"]:
+        # Note: We use the safer check and correct list setter for Enigma2
+        if "config" in self:
             self["config"].list = self.list
-            self["config"].l.setList(self.list)
+            self["config"].setList(self.list)
 
     def changedEntry(self):
         """Standard handler for ConfigListScreen to refresh logic on change"""
@@ -158,28 +178,27 @@ class PilotFSSetup(ConfigListScreen, Screen):
     def key_save(self):
         """Save configuration changes and close screen"""
         try:
-            for item in self["config"].list:
-                if len(item) > 1 and hasattr(item[1], 'save'):
-                    item[1].save()
+            # 1. Use the built-in ConfigListScreen saver to process all entries
+            from Components.ConfigList import ConfigListScreen
+            ConfigListScreen.saveAll(self)
             
+            # 2. Write the changes to the physical settings file (/etc/enigma2/settings)
             from Components.config import configfile
             configfile.save()
-            self.close()
-        except Exception as e:
-            print("[PilotFS] Save Error:", e)
+            
+            # 3. Close the screen and return to the previous menu
             self.close()
             
         except Exception as e:
-            # This will log the exact error to /tmp/pilotfs.log if it fails
+            # 4. Comprehensive error handling with logging
             logger.error(f"Error saving PilotFS settings: {e}")
             from Screens.MessageBox import MessageBox
             self.session.open(MessageBox, f"Error saving settings: {e}", MessageBox.TYPE_ERROR)
 
     def key_cancel(self):
-        """Cancel changes"""
-        for item in self.list:
-            if len(item) > 1 and hasattr(item[1], 'cancel'):
-                item[1].cancel()
+        """Cancel changes and close"""
+        from Components.ConfigList import ConfigListScreen
+        ConfigListScreen.cancelApply(self)
         self.close()
 
     def load_defaults(self):
@@ -203,11 +222,13 @@ class PilotFSSetup(ConfigListScreen, Screen):
     def keyOK(self):
         pass
 
-    def update_help_text(self):
-        """Update description if a help widget is added to skin later"""
-        try:
-            current = self["config"].getCurrent()
-            if current:
-                pass
-        except Exception as e:
-            logger.debug(f"Error updating help text: {e}")
+    # Change this in setup_screen.py
+def update_help_text(self):
+    try:
+        # Ensure we are accessing the widget, not the global config module
+        current = self["config"].getCurrent() 
+        if current and len(current) > 2:
+            # If you have help text in your config entries
+            self["help_label"].setText(current[2])
+    except Exception as e:
+        logger.debug(f"Error updating help text: {e}")

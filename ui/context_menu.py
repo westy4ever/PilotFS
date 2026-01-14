@@ -447,11 +447,25 @@ class ContextMenuHandler:
                 # FIXED: Direct import to avoid circular dependency
                 try:
                     # Try relative import first
+                    # Initialize config before opening setup screen
+                    try:
+                        from ..core.config import PilotFSConfig
+                        cfg_mgr = PilotFSConfig()
+                        cfg_mgr.setup_config()
+                    except Exception as cfg_err:
+                        pass  # Config already initialized
                     from ..ui.setup_screen import PilotFSSetup
                     self.main.session.open(PilotFSSetup, self.config)
                 except ImportError:
                     # Fallback to absolute import
                     try:
+                        # Initialize config before opening setup screen
+                        try:
+                            from ..core.config import PilotFSConfig
+                            cfg_mgr = PilotFSConfig()
+                            cfg_mgr.setup_config()
+                        except Exception as cfg_err:
+                            pass  # Config already initialized
                         from Plugins.Extensions.PilotFS.ui.setup_screen import PilotFSSetup
                         self.main.session.open(PilotFSSetup, self.config)
                     except Exception as e:
