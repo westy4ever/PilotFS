@@ -148,8 +148,32 @@ class Dialogs:
                 new_path = file_ops.create_file(current_dir, name)
                 msg = "File created: " + name
             
+            # Force immediate refresh
+            try:
+                # Clear any directory cache
+                import sys
+                if 'stat' in sys.modules:
+                    import stat
+                    try:
+                        os.stat(current_dir)  # Update directory stat
+                    except:
+                        pass
+            except:
+                pass
+            
+            # Call update callback multiple times for reliability
             update_callback()
-            self.show_message(msg, type="info", timeout=2)
+            
+            # Small delay and refresh again
+            import threading
+            def delayed_refresh():
+                import time
+                time.sleep(0.5)
+                update_callback()
+            
+            threading.Thread(target=delayed_refresh, daemon=True).start()
+            
+            self.show_message(msg, type="info", timeout=1)  # Shorter timeout
         except Exception as e:
             logger.error(f"Error executing create: {e}")
             self.show_message("Creation failed: " + str(e), type="error")
@@ -921,11 +945,28 @@ class Dialogs:
             self.show_message(f"Mount dialog error: {e}", type="error")
     
     def show_network_scan_dialog(self, mount_mgr):
-        """Show network scan dialog - discover SMB shares"""
+        """Show network scan dialog - discover SMB shares - FIXED"""
         try:
+            # Get router/default gateway IP
+            default_ip = "192.168.1.1"  # More common default
+            try:
+                import socket
+                # Try to get default gateway
+                result = subprocess.run(["ip", "route", "show", "default"], 
+                                      capture_output=True, text=True, timeout=2)
+                if result.returncode == 0 and "default via" in result.stdout:
+                    lines = result.stdout.strip().split('\n')
+                    for line in lines:
+                        if "default via" in line:
+                            parts = line.split()
+                            if len(parts) >= 3:
+                                default_ip = parts[2]
+            except:
+                pass
+            
             self.show_input(
                 "Enter server IP to scan for shares:",
-                "192.168.1.100",
+                default_ip,  # Use detected/default IP
                 lambda server: self._execute_network_scan(server, mount_mgr) if server else None
             )
         except Exception as e:
@@ -933,11 +974,13 @@ class Dialogs:
             self.show_message(f"Network scan error: {e}", type="error")
     
     def show_ping_dialog(self, mount_mgr):
-        """Show ping test dialog for network troubleshooting"""
+        """Show ping test dialog for network troubleshooting - FIXED"""
         try:
             choices = [
-                ("🔌 Ping Server", "ping_server"),
+                ("🔌 Ping Single Server", "ping_server"),
                 ("🌐 Ping Common Servers", "ping_common"),
+                ("🔍 Scan Network Range", "scan_range"),  # Add network scanning option
+                ("📱 Detect Local Devices", "detect_devices"),  # Add device detection
             ]
             
             self.show_choice(
@@ -1005,16 +1048,20 @@ class Dialogs:
         threading.Thread(target=scan_thread, daemon=True).start()
     
     def _handle_ping_action(self, choice, mount_mgr):
-        """Handle ping action"""
+        """Handle ping action - FIXED with new actions"""
         action = choice[1]
         if action == "ping_server":
             self.show_input(
                 "Enter server IP:",
-                "192.168.1.1",
+                "192.168.1.1",  # Router IP
                 lambda server: self._execute_ping(server, mount_mgr) if server else None
             )
         elif action == "ping_common":
             self._ping_common_servers(mount_mgr)
+        elif action == "scan_range":
+            self._scan_network_range(mount_mgr)  # New method
+        elif action == "detect_devices":
+            self._detect_local_devices(mount_mgr)  # New method
     
     def _execute_ping(self, server, mount_mgr):
         """Execute ping test"""
@@ -1043,6 +1090,72 @@ class Dialogs:
         
         import threading
         threading.Thread(target=ping_multiple, daemon=True).start()
+    
+    def _scan_network_range(self, mount_mgr):
+        """Scan IP range for active devices - NEW METHOD"""
+        def scan_thread():
+            try:
+                active_devices = []
+                base_ip = "192.168.1."
+                
+                self.show_message("🔍 Scanning network 192.168.1.1-254...", type="info", timeout=2)
+                
+                for i in range(1, 255):
+                    ip = base_ip + str(i)
+                    success, _ = mount_mgr.test_ping(ip)
+                    if success:
+                        active_devices.append(ip)
+                
+                if active_devices:
+                    msg = f"✅ Found {len(active_devices)} active devices:\n\n"
+                    for ip in active_devices[:20]:
+                        msg += f"• {ip}\n"
+                    if len(active_devices) > 20:
+                        msg += f"\n... and {len(active_devices) - 20} more"
+                else:
+                    msg = "❌ No active devices found"
+                
+                self.show_message(msg, type="info")
+            except Exception as e:
+                self.show_message(f"Scan error: {str(e)}", type="error")
+        
+        import threading
+        threading.Thread(target=scan_thread, daemon=True).start()
+    
+    def _detect_local_devices(self, mount_mgr):
+        """Detect local devices using arp - NEW METHOD"""
+        def detect_thread():
+            try:
+                devices = []
+                
+                # Try to get ARP table
+                result = subprocess.run(["arp", "-a"], capture_output=True, text=True, timeout=5)
+                
+                if result.returncode == 0 and result.stdout:
+                    lines = result.stdout.strip().split('\n')
+                    for line in lines:
+                        if "incomplete" not in line and "at" in line:
+                            parts = line.split()
+                            if len(parts) >= 2:
+                                ip = parts[1].strip('()')
+                                mac = parts[3] if len(parts) > 3 else "unknown"
+                                devices.append(f"{ip} ({mac})")
+                
+                if devices:
+                    msg = f"📱 Found {len(devices)} devices:\n\n"
+                    for device in devices[:15]:
+                        msg += f"• {device}\n"
+                    if len(devices) > 15:
+                        msg += f"\n... and {len(devices) - 15} more"
+                else:
+                    msg = "No devices found in ARP table"
+                
+                self.show_message(msg, type="info")
+            except Exception as e:
+                self.show_message(f"Device detection error: {str(e)}", type="error")
+        
+        import threading
+        threading.Thread(target=detect_thread, daemon=True).start()
     
     def _handle_mount_action(self, choice, mount_point, mount_mgr, filelist, update_callback):
         """Handle mount action - SIMPLIFIED"""
@@ -1245,10 +1358,7 @@ class Dialogs:
             logger.error(f"Error confirming bulk rename: {e}")
             self.show_message(f"Bulk rename confirmation error: {e}", type="error")
     
-    # ========================================================================
-    # MISSING DIALOG METHODS - FIXING THE ERRORS
-    # ========================================================================
-    
+    # Cleanup dialogs
     def show_cleanup_dialog(self, directory, file_ops, filelist, update_callback):
         """Show cleanup dialog for temporary/duplicate files"""
         try:
@@ -1573,29 +1683,54 @@ class Dialogs:
             self.show_message(f"Clear queue failed: {e}", type="error")
     
     def show_log_viewer(self):
-        """Show log viewer dialog"""
+        """Show log viewer dialog - FIXED"""
         try:
             log_content = self._read_log_file()
+            
+            # Check if it's an error message
+            if log_content and ("not found" in log_content or "Error reading" in log_content):
+                self.show_message(log_content, type="error")
+                return
+            
             if log_content:
                 # Truncate if too long
                 if len(log_content) > 5000:
                     log_content = "... (earlier logs truncated) ...\n\n" + log_content[-5000:]
                 
-                self.show_message(f"PilotFS Logs:\n\n{log_content}", type="info")
+                self.show_message(f"📄 PilotFS Logs:\n\n{log_content}", type="info")
             else:
-                self.show_message("Log file is empty or not found", type="info")
+                self.show_message("Log file is empty", type="info")
         except Exception as e:
             logger.error(f"Error showing log viewer: {e}")
             self.show_message(f"Log viewer error: {e}", type="error")
     
     def _read_log_file(self):
-        """Read log file content"""
+        """Read log file content - FIXED"""
         try:
-            if os.path.exists(LOG_FILE):
-                with open(LOG_FILE, 'r', encoding='utf-8', errors='ignore') as f:
-                    return f.read()
-            else:
-                return "Log file not found: " + LOG_FILE
+            # Check multiple possible log locations
+            log_locations = [
+                "/tmp/pilotfs.log",  # Default
+                "/var/log/pilotfs.log",
+                "/home/root/pilotfs.log",
+                "/media/hdd/pilotfs.log",
+            ]
+            
+            for log_file in log_locations:
+                if os.path.exists(log_file):
+                    with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
+                        if content:
+                            return f"Log file: {log_file}\n\n{content}"
+            
+            # Create log file if it doesn't exist
+            default_log = "/tmp/pilotfs.log"
+            if not os.path.exists(default_log):
+                with open(default_log, 'w') as f:
+                    f.write(f"PilotFS Log created: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                return f"Created new log file: {default_log}\n\nLogging will start with next operation."
+            
+            return "Log file exists but is empty"
+            
         except Exception as e:
             return f"Error reading log file: {e}"
     
@@ -1621,4 +1756,3 @@ class Dialogs:
         except Exception as e:
             logger.error(f"Error showing bulk rename dialog: {e}")
             self.show_message(f"Bulk rename dialog error: {e}", type="error")
-    

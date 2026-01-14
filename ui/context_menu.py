@@ -11,6 +11,48 @@ from ..utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+# ============================================================================
+# FIX FOR STACKTRACE THREADING ISSUE
+# ============================================================================
+# Patch to prevent StackTrace formatting errors in OpenATV
+import threading
+import sys
+
+# Monkey patch Thread.run to handle StackTrace errors
+try:
+    original_thread_run = threading.Thread.run
+    
+    def patched_thread_run(self):
+        try:
+            original_thread_run(self)
+        except TypeError as e:
+            if "%d format" in str(e) or "real number is required" in str(e):
+                # StackTrace formatting error - run target directly
+                logger.warning(f"StackTrace formatting error in thread {self.name}: {e}")
+                if hasattr(self, '_target') and self._target:
+                    try:
+                        self._target(*self._args, **self._kwargs)
+                    except Exception as target_error:
+                        logger.error(f"Thread target error: {target_error}")
+            else:
+                raise
+        except Exception as thread_error:
+            logger.error(f"Thread error in {self.name}: {thread_error}")
+            # Try to run target anyway
+            if hasattr(self, '_target') and self._target:
+                try:
+                    self._target(*self._args, **self._kwargs)
+                except:
+                    pass
+    
+    threading.Thread.run = patched_thread_run
+    logger.info("Threading patch applied successfully")
+    
+except Exception as patch_error:
+    logger.error(f"Failed to apply threading patch: {patch_error}")
+
+# ============================================================================
+
 class ContextMenuHandler:
     def smart_callback(self, choice, original_handler, *args):
         """Traffic controller for all menus: Handles EXIT/BACK automatically"""
@@ -1120,9 +1162,7 @@ class ContextMenuHandler:
         """Execute folder rename"""
         try:
             new_path = self.file_ops.rename(old_path, new_name)
-            self.main.active_pane.changeDir(os.path.dirname(old_path))
-            self.main.active_pane.refresh()
-            self.main.update_ui()
+            self._force_refresh_pane()
             self.main.dialogs.show_message(f"✅ Folder renamed to: {new_name}", type="info")
         except Exception as e:
             logger.error(f"Error executing folder rename: {e}")
@@ -1147,8 +1187,7 @@ class ContextMenuHandler:
         """Execute item rename"""
         try:
             new_path = self.file_ops.rename(old_path, new_name)
-            self.main.active_pane.refresh()
-            self.main.update_ui()
+            self._force_refresh_pane()
             self.main.dialogs.show_message(f"✅ Renamed to: {new_name}", type="info")
         except Exception as e:
             logger.error(f"Error executing item rename: {e}")
@@ -1174,8 +1213,7 @@ class ContextMenuHandler:
         
         try:
             self.file_ops.delete(item_path)
-            self.main.active_pane.refresh()
-            self.main.update_ui()
+            self._force_refresh_pane()
             
             if self.config.plugins.pilotfs.trash_enabled.value == "yes":
                 msg = f"✅ Moved to trash: {item_name}"
@@ -1223,8 +1261,7 @@ class ContextMenuHandler:
                 if len(errors) > 3:
                     msg += f"\n... and {len(errors) - 3} more"
             
-            self.main.active_pane.refresh()
-            self.main.update_ui()
+            self._force_refresh_pane()
             self.main.dialogs.show_message(msg, type="info")
         except Exception as e:
             logger.error(f"Error executing multiple deletion: {e}")
@@ -1404,68 +1441,97 @@ class ContextMenuHandler:
             self.dialogs.show_message(f"Script action error: {e}", type="error")
     
     def _execute_script(self, file_path, param, background):
-        """Execute shell script - IMPROVED WITH BETTER TIMEOUT HANDLING"""
+        """Execute shell script - FIXED with better error handling"""
         import subprocess
         import threading
         
         def run_script():
             try:
                 cmd = ["/bin/sh", file_path]
-                if param:
-                    cmd.append(param)
+                if param and param.strip():
+                    cmd.append(param.strip())
                 
                 if background:
                     # For background execution, use Popen with detached process
-                    result = subprocess.Popen(cmd, 
-                                            stdout=subprocess.PIPE, 
-                                            stderr=subprocess.PIPE,
-                                            start_new_session=True)
-                    
-                    # Store PID for potential management
-                    script_pid = result.pid
-                    logger.info(f"Script started in background with PID: {script_pid}")
-                    
-                    self.main.dialogs.show_message(
-                        f"Script started in background\n\nPID: {script_pid}",
-                        type="info", timeout=3
-                    )
+                    try:
+                        result = subprocess.Popen(cmd, 
+                                                stdout=subprocess.PIPE, 
+                                                stderr=subprocess.PIPE,
+                                                start_new_session=True)
+                        
+                        # Store PID for potential management
+                        script_pid = result.pid
+                        logger.info(f"Script started in background with PID: {script_pid}")
+                        
+                        self.main.dialogs.show_message(
+                            f"Script started in background\n\nPID: {script_pid}",
+                            type="info", timeout=3
+                        )
+                    except Exception as e:
+                        logger.error(f"Background script execution error: {e}")
+                        self.main.dialogs.show_message(
+                            f"Failed to start script in background: {str(e)}",
+                            type="error"
+                        )
                 else:
                     # For foreground execution, use run with timeout
-                    # Increased timeout from 30 to 120 seconds for complex scripts
-                    result = subprocess.run(cmd, 
-                                          capture_output=True, 
-                                          text=True, 
-                                          timeout=120,
-                                          encoding='utf-8',
-                                          errors='ignore')
-                    
-                    output = result.stdout if result.stdout else result.stderr
-                    if not output:
-                        output = "Script executed successfully" if result.returncode == 0 else "Script failed"
-                    
-                    # Limit output display to reasonable size
-                    display_output = output[:800]
-                    if len(output) > 800:
-                        display_output += "\n\n... (output truncated)"
-                    
-                    self.main.dialogs.show_message(
-                        f"Script Output (Exit code: {result.returncode}):\n\n{display_output}",
-                        type="info" if result.returncode == 0 else "error"
-                    )
-                    
-            except subprocess.TimeoutExpired:
-                logger.warning(f"Script execution timed out: {file_path}")
-                self.main.dialogs.show_message(
-                    "Script execution timed out (120 seconds)\n\nThe script may still be running in background.",
-                    type="error"
-                )
+                    try:
+                        result = subprocess.run(cmd, 
+                                              capture_output=True, 
+                                              text=True, 
+                                              timeout=120,
+                                              encoding='utf-8',
+                                              errors='ignore')
+                        
+                        # Check if result is not None
+                        if result is not None:
+                            exit_code = result.returncode if hasattr(result, 'returncode') else -1
+                            output = ""
+                            
+                            if hasattr(result, 'stdout') and result.stdout:
+                                output = result.stdout
+                            elif hasattr(result, 'stderr') and result.stderr:
+                                output = result.stderr
+                            
+                            if not output:
+                                output = "Script executed successfully" if exit_code == 0 else "Script failed"
+                            
+                            # Limit output display to reasonable size
+                            display_output = str(output)[:800]
+                            if len(str(output)) > 800:
+                                display_output += "\n\n... (output truncated)"
+                            
+                            self.main.dialogs.show_message(
+                                f"Script Output (Exit code: {exit_code}):\n\n{display_output}",
+                                type="info" if exit_code == 0 else "error"
+                            )
+                        else:
+                            self.main.dialogs.show_message(
+                                "Script executed (no output returned)",
+                                type="info"
+                            )
+                            
+                    except subprocess.TimeoutExpired:
+                        logger.warning(f"Script execution timed out: {file_path}")
+                        self.main.dialogs.show_message(
+                            "Script execution timed out (120 seconds)\n\nThe script may still be running in background.",
+                            type="error"
+                        )
+                    except Exception as e:
+                        logger.error(f"Foreground script execution error: {e}")
+                        self.main.dialogs.show_message(f"Script error: {str(e)}", type="error")
+                        
             except Exception as e:
                 logger.error(f"Script execution error: {e}")
-                self.main.dialogs.show_message(f"Script error: {str(e)}", type="error")
+                self.main.dialogs.show_message(f"Script setup error: {str(e)}", type="error")
         
         # Start script execution in separate thread
-        script_thread = threading.Thread(target=run_script, daemon=True)
-        script_thread.start()
+        try:
+            script_thread = threading.Thread(target=run_script, daemon=True)
+            script_thread.start()
+        except Exception as e:
+            logger.error(f"Failed to start script thread: {e}")
+            self.main.dialogs.show_message(f"Failed to start script thread: {str(e)}", type="error")
     
     def _show_archive_menu(self, file_path, filename):
         """Context menu for archive files"""
@@ -1885,3 +1951,30 @@ class ContextMenuHandler:
         except Exception as e:
             logger.error(f"Error handling text action: {e}")
             self.dialogs.show_message(f"Text action error: {e}", type="error")
+    
+    def _force_refresh_pane(self):
+        """Force refresh the active pane - NEW METHOD ADDED"""
+        try:
+            current_dir = self.main.active_pane.getCurrentDirectory()
+            
+            # Change to parent and back to force refresh
+            parent_dir = os.path.dirname(current_dir)
+            if parent_dir != current_dir:
+                self.main.active_pane.changeDir(parent_dir)
+                self.main.active_pane.changeDir(current_dir)
+            else:
+                # If already at root, refresh directly
+                self.main.active_pane.refresh()
+            
+            # Update UI
+            self.main.update_ui()
+            
+            # Force redraw
+            if hasattr(self.main.active_pane, 'instance'):
+                try:
+                    self.main.active_pane.instance.invalidate()
+                except:
+                    pass
+                    
+        except Exception as e:
+            logger.error(f"Error forcing refresh: {e}")

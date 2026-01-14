@@ -196,10 +196,8 @@ class PilotFSSetup(ConfigListScreen, Screen):
             self.session.open(MessageBox, f"Error saving settings: {e}", MessageBox.TYPE_ERROR)
 
     def key_cancel(self):
-        """Cancel changes and close"""
-        from Components.ConfigList import ConfigListScreen
-        ConfigListScreen.cancelApply(self)
-        self.close()
+        # Simple fix: just close without confirmation
+        self.close(False)  # False = don't save changes
 
     def load_defaults(self):
         """Use the reset logic from config.py"""
