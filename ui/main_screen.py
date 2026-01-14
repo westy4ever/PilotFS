@@ -1562,6 +1562,15 @@ class PilotFSMain(Screen):
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
             self.close()
+            
+            # Add these two methods here to fix skin errors
+    def createSummary(self):
+        """Create summary screen to avoid skin errors"""
+        return None
+    
+    def getSummaryText(self):
+        """Return summary text to avoid skin errors"""
+        return "PilotFS File Manager"
 
     # Helper method for delete multiple
     def _execute_delete_multiple(self, confirmed, files):
